@@ -73,7 +73,7 @@
 - [ ] Switch between Bluetooth / Line-in / SD Card / USB Audio modes
 
 ### Integrations
-- [x] Claude Code status display (working/alerting/chilling faces via hooks)
+- [x] Claude Code status display (animated working/alerting/chilling faces via hooks)
 - [ ] Long-running daemon holding one connection -- would give sub-second state
       changes, animated faces, no audio interruption, and multi-session merging
 - [ ] Investigate uploading faces once and switching with `clock set` (ext 0x14)

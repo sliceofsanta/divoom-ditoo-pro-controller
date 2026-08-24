@@ -118,9 +118,18 @@ apply_state() {
     return $?
   fi
 
-  local face="$FACES_DIR/$state.png"
-  if [ ! -f "$face" ]; then
-    log "ERROR no face image for state '$state' at $face"
+  # Prefer the animated GIF; the PNG is a single-frame fallback for anyone who
+  # drops in their own still image.
+  local face=""
+  local candidate
+  for candidate in "$FACES_DIR/$state.gif" "$FACES_DIR/$state.png"; do
+    if [ -f "$candidate" ]; then
+      face="$candidate"
+      break
+    fi
+  done
+  if [ -z "$face" ]; then
+    log "ERROR no face image for state '$state' in $FACES_DIR (tried .gif, .png)"
     return 1
   fi
   run_bin "$bin" image "$face"

@@ -4,12 +4,16 @@ Turn a Divoom Ditoo Pro into a physical status light for
 [Claude Code](https://claude.com/claude-code): the 16x16 display shows whether
 Claude is working, waiting on you, or idle.
 
-| State | When | Face |
+| State | When | Animation |
 |---|---|---|
-| `working` | you submit a prompt, or Claude runs any tool | focused cyan eyes + progress bar |
-| `alerting` | Claude needs your input (permission prompt, question) | wide red eyes, open mouth |
-| `chilling` | Claude finished responding | sleepy green eyes, soft smile |
+| `working` | you submit a prompt, or Claude runs any tool | cyan; eyes scan back and forth over a filling progress bar |
+| `alerting` | Claude needs your input (permission prompt, question) | red; wide eyes pulse with flashing exclamation bars |
+| `chilling` | Claude finished responding | green; resting eyes, soft smile, slow breathing bob |
 | `off` | manual only | blank display |
+
+The faces are **animated** -- 6 to 8 frames each, played on the device. At 16x16
+colour does most of the work of telling states apart across a room, and motion
+does the rest; the shapes only resolve up close.
 
 The point is the `alerting` state: you can look away from the terminal and still
 notice the moment Claude is blocked on you.
@@ -95,19 +99,26 @@ All optional, set as environment variables:
 
 ## Custom faces
 
-Faces are plain 16x16 PNGs -- drop your own into `faces/` using the state name as
-the filename. Any format the `image` command accepts works if you adjust the
-script.
+Drop your own 16x16 animated GIF into `faces/` named after the state
+(`working.gif`, `alerting.gif`, `chilling.gif`). A same-named `.png` is used as a
+single-frame fallback if no GIF exists.
 
-To edit the bundled ones, change the pixel grids in
+To edit the bundled ones, change the component calls in
 [`faces/generate_faces.py`](faces/generate_faces.py) and re-run it:
 
 ```bash
 python3 faces/generate_faces.py --preview
 ```
 
-It prints an ASCII preview of each face and writes 320x320 `*_preview.png` files
-so you can see them without squinting. Only stdlib is used -- no pip installs.
+Faces are composed from named parts (`eye_open`, `eye_arc`, `mouth_smile`, ...)
+rather than hand-drawn grids, so retiming or restyling is a few numbers. The
+script prints an ASCII preview and, with `--preview`, writes 320x320
+`*_preview.gif` files you can watch without squinting.
+
+Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
+GIF89a encoder written for this purpose, so there are no pip installs. If you
+touch its LZW code, note the comment about code-width timing: the widening rule
+has to lag by one code or real decoders reject the output.
 
 ## How it works
 
@@ -135,7 +146,9 @@ failure is logged to `$DITOO_RUNDIR/log` and never disrupts Claude Code.
   states across sessions needs the daemon described below.
 - **~3 second lag** before a state change reaches the display, because every
   command opens a fresh Bluetooth connection. Not noticeable for `alerting`
-  (you were away anyway), noticeable if you watch for it.
+  (you were away anyway), noticeable if you watch for it. Each face is only
+  500-660 bytes on the wire, so the transfer itself is not the bottleneck --
+  the connection setup is.
 - **Audio interruption on macOS.** Opening the control channel requires dropping
   the audio link, so each state change briefly interrupts Bluetooth music
   playing on the speaker. If you use the Ditoo as a speaker while coding, you
@@ -144,5 +157,6 @@ failure is logged to `$DITOO_RUNDIR/log` and never disrupts Claude Code.
   display after you quit. Add one calling `off` if you would rather it blank.
 
 A long-running daemon holding a single connection would fix the lag, the audio
-interruption, and multi-session merging, and would allow animated faces. That is
-the natural next step; see the ideas in [TODO.md](../../TODO.md).
+interruption, and multi-session merging, and would let animations respond to
+what Claude is actually doing rather than looping a fixed clip. That is the
+natural next step; see the ideas in [TODO.md](../../TODO.md).

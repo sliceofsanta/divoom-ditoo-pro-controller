@@ -10,4 +10,4 @@ CLAUDE.local.md
 
 # generated previews for the Claude Code status faces (regenerate with
 # integrations/claude-code/faces/generate_faces.py --preview)
-**/faces/*_preview.png
+**/faces/*_preview.*
