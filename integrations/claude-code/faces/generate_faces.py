@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Generate the animated 16x16 status faces shown on the Ditoo Pro.
 
-All three states are Claude's starburst mark; what changes is how it moves and
-what it sits on. A radial form is the rare thing that survives 16x16 -- it has
-no silhouette to lose and reads at any rotation:
+The character is Claude's mascot -- the stocky four-legged fellow from the
+marketing site, who is built entirely out of rectangles and therefore takes to
+a 256-LED panel better than almost anything else would. He keeps his own colour
+in all three states; what changes is what he is DOING:
 
-    working   the mark spinning, coral on near-black blue
-    alerting  the mark flaring white against a red pulse
-    chilling  the mark breathing slowly, dimmed right down
+    working   marching on the spot, hands swinging
+    alerting  jumping up and down with both hands over his head
+    chilling  idling -- breathing, looking about, blinking
 
-Stdlib only (see mark.py for the sprite and gifwriter.py for the encoder), so
+Stdlib only (see mascot.py for the sprite and gifwriter.py for the encoder), so
 this runs anywhere without pip installs.
 
     python3 generate_faces.py            # write the GIFs (+ PNG fallbacks)
@@ -17,88 +18,90 @@ this runs anywhere without pip installs.
 """
 
 import argparse
-import math
 import os
 import struct
 import sys
 import zlib
 
-import mark
-from mark import SIZE, draw, px
+import mascot
+from mascot import SIZE, draw
 from gifwriter import write_gif
 
-# Backgrounds: dark enough that the mark stays the brightest thing on the panel.
-BG_CHILL = (0, 8, 6)
-BG_WORK = (0, 8, 18)
-BG_ALERT_HOT = (96, 4, 0)
+# Backgrounds: dark, so the mascot stays the brightest thing on the panel.
+BG_CHILL = (0, 14, 9)
+BG_WORK = (0, 9, 20)
+BG_ALERT_HOT = (104, 6, 0)
 BG_ALERT_COOL = (26, 0, 0)
 
-ALERT_FLASH = (255, 236, 190)
-CHILL_RAY = (150, 78, 55)
-CHILL_TIP = (196, 108, 78)
-CHILL_CORE = (214, 130, 100)
+CHILL_BODY = (150, 82, 62)
+CHILL_DARK = (104, 54, 40)
+CHILL_LIGHT = (186, 110, 86)
 
 
 def chilling_frames():
-  """Idle: the mark breathing slowly, dimmed right down.
-
-  The rays have to travel a good pixel and a half either side of centre --
-  a subtler breath quantises away to nothing at this resolution and the
-  animation just sits there.
-  """
+  """Idle: breathing, glancing about, and a blink -- he is waiting, not off."""
+  bob   = [0, 0, 1, 1, 0, 0, 0, 0]
+  gaze  = [0, 0, 0, -1, -1, 0, 1, 0]
+  blink = [False, False, False, False, False, True, False, False]
   frames = []
-  count = 8
-  for i in range(count):
-    # One smooth in-and-out over the loop, so there is no seam.
-    phase = math.sin(2 * math.pi * i / count)
-    warmth = (phase + 1) / 2  # 0 at the smallest, 1 at the fullest
-    rays = tuple(
-      int(base + (full - base) * warmth)
-      for base, full in zip(CHILL_RAY, CHILL_TIP)
-    )
-    grid = draw(
+  for i in range(8):
+    frames.append(draw(
       BG_CHILL,
-      rotation=0.0,
-      r1=5.9 + 1.5 * phase,
-      colour=rays, tip=CHILL_TIP, core=CHILL_CORE, core_size=2
-    )
-    frames.append(grid)
-  return frames, [220] * count
+      body_y=3 + bob[i], gaze=gaze[i], blink=blink[i],
+      hand_l=bob[i], hand_r=bob[i],
+      body=CHILL_BODY, dark=CHILL_DARK, light=CHILL_LIGHT
+    ))
+  return frames, [250] * 8
 
 
 def working_frames():
-  """Busy: the mark spinning. Eight rays means 45 degrees is a full period,
-  so stepping through exactly that much loops seamlessly."""
+  """Busy: marching on the spot, glancing about as he goes.
+
+  The legs run a four-beat contact-pass-contact-pass cycle and the hands swing
+  opposite them, which is what sells it as a stride rather than a wobble. The
+  gaze runs on a different period on purpose: put both on the same beat and the
+  two motions lock together and the whole thing reads as one flat repeat.
+  """
+  stride = [(1, -1, 1, -1), (0, 0, 0, 0), (-1, 1, -1, 1), (0, 0, 0, 0)]
+  swing = [-1, 0, 1, 0]
+  gaze = [0, 0, 1, 1, 0, 0, -1, -1]
   frames = []
-  count = 8
-  for i in range(count):
-    grid = draw(BG_WORK, rotation=(math.pi / 4) * i / count)
-    frames.append(grid)
-  return frames, [110] * count
+  for i in range(8):
+    beat = i % 4
+    frames.append(draw(
+      BG_WORK,
+      body_y=3 + (i % 2),
+      legs=stride[beat],
+      hand_l=swing[beat],
+      hand_r=-swing[beat],
+      gaze=gaze[i]
+    ))
+  return frames, [120] * 8
 
 
 def alerting_frames():
-  """Blocked on you: the mark flaring against a red pulse.
+  """Blocked on you: jumping up and down with both hands over his head.
 
-  The flare and the background run on different periods -- put both on the
-  same 2-frame beat and the animation collapses into a single flip.
+  Crouch, launch, hang, fall, land heavy, recover -- the squash at each end is
+  what gives the hop any weight at all in six frames.
   """
+  # body_y, squash, legs lifted, hand offset, background hot
+  poses = [
+    (4, 1, (0, 0, 0, 0),         1, False),   # crouch
+    (2, 0, (-1, -1, -1, -1),    -1, True),    # launch
+    (1, 0, (-1, -1, -1, -1),    -2, True),    # hang at the top
+    (2, 0, (-1, -1, -1, -1),    -1, True),    # falling
+    (4, 1, (0, 0, 0, 0),         2, False),   # land heavy, hands flung down
+    (3, 0, (0, 0, 0, 0),         0, False),   # recover
+  ]
   frames = []
-  count = 6
-  for i in range(count):
-    hot = i % 2 == 0
-    flare = i % 3 == 0
-    grid = draw(
+  for body_y, squash, legs, hand, hot in poses:
+    frames.append(draw(
       BG_ALERT_HOT if hot else BG_ALERT_COOL,
-      rotation=(math.pi / 4) * (i % 2) / 2,
-      r1=7.0 if flare else 5.6,
-      colour=ALERT_FLASH if flare else mark.CORAL,
-      tip=ALERT_FLASH if flare else mark.CORAL_LIGHT,
-      core=ALERT_FLASH,
-      core_size=3 if flare else 2
-    )
-    frames.append(grid)
-  return frames, [100] * count
+      body_y=body_y, squash=squash, legs=legs,
+      hand_l=hand, hand_r=hand, gaze=0
+    ))
+  return frames, [110] * len(poses)
 
 
 def off_frames():
@@ -107,9 +110,9 @@ def off_frames():
 
 
 FACES = {
-  "chilling": (chilling_frames, "idle -- the mark breathing, dimmed down"),
-  "working": (working_frames, "busy -- the mark spinning"),
-  "alerting": (alerting_frames, "blocked on you -- the mark flaring, red pulse"),
+  "chilling": (chilling_frames, "idle -- breathing, looking about, blinking"),
+  "working": (working_frames, "busy -- marching on the spot"),
+  "alerting": (alerting_frames, "blocked on you -- jumping, hands overhead"),
   "off": (off_frames, "blank display"),
 }
 
@@ -162,8 +165,9 @@ def write_png(path, frame):
 
 
 CHARS = {
-  mark.CORAL: "#", mark.CORAL_LIGHT: "*", mark.CORE: "@",
-  CHILL_RAY: "#", CHILL_TIP: "*", CHILL_CORE: "@", ALERT_FLASH: "!",
+  mascot.BODY: "#", mascot.BODY_DARK: "+", mascot.BODY_LIGHT: "*",
+  mascot.EYE: "o", mascot.EYE_SHINE: "@",
+  CHILL_BODY: "#", CHILL_DARK: "+", CHILL_LIGHT: "*",
 }
 
 

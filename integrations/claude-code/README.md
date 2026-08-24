@@ -4,18 +4,20 @@ Turn a Divoom Ditoo Pro into a physical status light for
 [Claude Code](https://claude.com/claude-code): the 16x16 display shows whether
 Claude is working, waiting on you, or idle.
 
-All three states are Claude's starburst mark in coral; what changes is how it
-moves and what it sits on.
+The character is **Claude's mascot** -- the stocky four-legged fellow from the
+marketing site. He keeps his own colour throughout; what changes is what he is
+doing.
 
 | State | When | Animation |
 |---|---|---|
-| `working` | you submit a prompt, or Claude runs any tool | the mark spinning |
-| `alerting` | Claude needs your input (permission prompt, question) | the mark flaring white against a red pulse |
-| `chilling` | Claude finished responding | the mark breathing slowly, dimmed right down |
+| `working` | you submit a prompt, or Claude runs any tool | marching on the spot, hands swinging, eyes darting |
+| `alerting` | Claude needs your input (permission prompt, question) | jumping up and down with both hands overhead |
+| `chilling` | Claude finished responding | idling -- breathing, glancing about, blinking |
 | `off` | manual only | blank display |
 
-A radial form is the rare thing that survives 16x16: there is no silhouette to
-lose and it reads at any rotation, which is exactly what makes it animate.
+The mascot is built entirely from `<rect>` elements -- no paths, no curves --
+which is the happy reason he survives being squeezed onto 256 LEDs. Scaling him
+down is a reduction, not a reinterpretation.
 
 The point is the `alerting` state: you can look away from the terminal and still
 notice the moment Claude is blocked on you.
@@ -106,10 +108,11 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 single-frame fallback if no GIF exists.
 
 To edit the bundled ones, change the frame definitions in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The mark
-itself lives in [`faces/mark.py`](faces/mark.py), drawn from four numbers --
-`rotation` spins it, `r0`/`r1` set where each ray starts and ends, `rays` is
-the count, `core_size` sizes the centre:
+[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The sprite
+lives in [`faces/mascot.py`](faces/mascot.py), posed by a handful of numbers --
+`body_y` hops him, `squash` flattens him on landing, `legs` sets each of the
+four independently, `hand_l`/`hand_r` swing the hands, `gaze` and `blink` do
+the eyes:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -118,16 +121,17 @@ python3 faces/generate_faces.py --preview
 The script prints an ASCII preview of each first frame and, with `--preview`,
 writes 320x320 `*_preview.gif` files you can watch without squinting.
 
-Two traps this resolution sets. Give a shape cycle and a colour pulse the same
-period and they alias into a single flip -- alerting runs its flare on a 3-beat
-against a 2-beat background for that reason. And a motion that is too subtle
-quantises away to nothing: the breathing had to travel a pixel and a half either
-side of centre before it read as movement at all.
+Two things worth knowing before you retime anything. Lock two motions to the
+same period and the loop flattens into a single repeat -- the first cut of the
+march put the legs and the bob on the same beat and eight frames collapsed into
+four; the legs and the gaze now run on deliberately different beats. And the
+squash at each end of the jump is what gives it weight: without it he simply
+teleports up and back.
 
-If you touch `mark.py`, note that rays are plotted by distance to pixel centres
-rather than by rounding a float. Rounding lands the vertical ray a column off
-from its opposite (Python rounds halves to even, and `cos(pi/2)` is a hair below
-zero), and the burst comes out visibly lopsided.
+Proportions in `mascot.py` come from the source SVG -- four legs 11 units wide
+at x = 11, 32, 64 and 85, which scale to columns 2-3, 5-6, 9-10 and 12-13. The
+hands are deliberately a single pixel hard against each edge: two pixels wide
+and they touch the body, and all three merge into one bar.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you
