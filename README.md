@@ -180,12 +180,19 @@ macOS is supported natively via IOBluetooth (Linux uses BlueZ). Differences:
 cargo install --path . --no-default-features --features all-image-formats
 ```
 
+# Claude Code status display
+
+Use the display as a physical status light for Claude Code -- it shows when
+Claude is working, waiting on your input, or idle. See
+[integrations/claude-code](integrations/claude-code/README.md).
+
 # Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) -- module map, data flow, connection lifecycle
 - [docs/PROTOCOL.md](docs/PROTOCOL.md) -- SPP wire framing, opcode table, per-command payloads
 - [docs/FILE_FORMAT.md](docs/FILE_FORMAT.md) -- the `.divoom16` binary format
 - [CLAUDE.md](CLAUDE.md) -- orientation for AI coding agents
+- [integrations/claude-code](integrations/claude-code/README.md) -- Claude Code status display
 - [TODO.md](TODO.md) -- implemented vs. not-yet-implemented features
 
 # Development
