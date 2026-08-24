@@ -4,19 +4,18 @@ Turn a Divoom Ditoo Pro into a physical status light for
 [Claude Code](https://claude.com/claude-code): the 16x16 display shows whether
 Claude is working, waiting on you, or idle.
 
-The character is **Clawd**, Claude Code's pixel crab.
+All three states are Claude's starburst mark in coral; what changes is how it
+moves and what it sits on.
 
 | State | When | Animation |
 |---|---|---|
-| `working` | you submit a prompt, or Claude runs any tool | claws alternate on the keys, eyes down, bar sweeping |
-| `alerting` | Claude needs your input (permission prompt, question) | both claws waving overhead, wide eyes, red pulse |
-| `chilling` | Claude finished responding | napping -- eyes shut, breathing bob, a z drifting off |
+| `working` | you submit a prompt, or Claude runs any tool | the mark spinning |
+| `alerting` | Claude needs your input (permission prompt, question) | the mark flaring white against a red pulse |
+| `chilling` | Claude finished responding | the mark breathing slowly, dimmed right down |
 | `off` | manual only | blank display |
 
-Clawd keeps his Claude orange in every state so he reads as the same character;
-the state is carried by the background wash, his pose, and the motion. At 16x16
-colour is what you catch across a room and motion is what you catch at a
-glance -- the silhouette only resolves up close.
+A radial form is the rare thing that survives 16x16: there is no silhouette to
+lose and it reads at any rotation, which is exactly what makes it animate.
 
 The point is the `alerting` state: you can look away from the terminal and still
 notice the moment Claude is blocked on you.
@@ -107,11 +106,10 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 single-frame fallback if no GIF exists.
 
 To edit the bundled ones, change the frame definitions in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The sprite
-itself lives in [`faces/clawd.py`](faces/clawd.py), posed by five numbers --
-`body_y` bobs him, `claw_l`/`claw_r` raise each claw, `eye` picks
-open/down/closed/wide, `splay` widens his stance -- so no pose is drawn twice
-by hand:
+[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The mark
+itself lives in [`faces/mark.py`](faces/mark.py), drawn from four numbers --
+`rotation` spins it, `r0`/`r1` set where each ray starts and ends, `rays` is
+the count, `core_size` sizes the centre:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -120,9 +118,16 @@ python3 faces/generate_faces.py --preview
 The script prints an ASCII preview of each first frame and, with `--preview`,
 writes 320x320 `*_preview.gif` files you can watch without squinting.
 
-One animation trap worth knowing: give a pose cycle and a colour pulse the same
-period and they alias into a single flip. The alerting claws see-saw over 3
-positions against a 2-frame pulse for exactly that reason.
+Two traps this resolution sets. Give a shape cycle and a colour pulse the same
+period and they alias into a single flip -- alerting runs its flare on a 3-beat
+against a 2-beat background for that reason. And a motion that is too subtle
+quantises away to nothing: the breathing had to travel a pixel and a half either
+side of centre before it read as movement at all.
+
+If you touch `mark.py`, note that rays are plotted by distance to pixel centres
+rather than by rounding a float. Rounding lands the vertical ray a column off
+from its opposite (Python rounds halves to even, and `cos(pi/2)` is a hair below
+zero), and the burst comes out visibly lopsided.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you
