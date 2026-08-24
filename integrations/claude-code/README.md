@@ -30,6 +30,45 @@ The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
 from a status light into a tiny desk companion.
 
+## Replacing the animations
+
+The faces are plain assets -- swap them freely. The daemon reads
+`<state>.gif` from the faces directory (falling back to `<state>.png`), so a
+new animation is a file drop and a `ditoo-state.sh` restart away.
+
+**Hard requirements**
+
+| | |
+|---|---|
+| Size | exactly **16x16 pixels**, no padding or borders |
+| Format | animated **GIF** (a `.png` is accepted as a single frame) |
+| Frames | 6-10 works well; 1 is fine for a still |
+| Frame delay | 80-260ms. Under ~80ms reads as a blur on LEDs |
+| Colours | at most 256, which 256 pixels can never exceed -- so no constraint in practice |
+| Size on wire | 400-1300 bytes is typical; larger just takes longer to send |
+
+**What this display actually rewards** -- learned the hard way here:
+
+- **Colour is the signal.** From across a room you see a colour and a rhythm,
+  nothing else. Two states that share a palette are two states you cannot tell
+  apart without walking over.
+- **Every frame must differ.** Duplicate frames read as a stutter. Watch for
+  this specifically: if a shape cycle and a colour pulse share a period, they
+  alias and an eight-frame loop collapses into four. Give them different beats.
+- **Subtle motion vanishes.** Movement under about 1.5 pixels quantises away
+  entirely -- a gentle breath simply sits still. Move things further than feels
+  right on a monitor.
+- **Silhouette barely survives.** Shapes only resolve up close. Motion and
+  colour carry the meaning; detail is decoration.
+
+**Verify a new face before trusting it** -- this catches a malformed GIF, a
+wrong size and a frame-count surprise in one go:
+
+```bash
+divoom-ditoo-pro-controller convert to-divoom16 faces/working.gif /tmp/f.d16
+RUST_LOG=debug divoom-ditoo-pro-controller debug-image /tmp/f.d16 | grep 'Frame #'
+```
+
 ## The daemon (read this first)
 
 Each connect/disconnect makes the device play its Bluetooth chime, and no

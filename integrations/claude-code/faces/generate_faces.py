@@ -486,7 +486,8 @@ CHARS = {
   mascot.FACE: "f", mascot.FACE_LIGHT: "F",
   mascot.EYE: "o", mascot.EYE_SHINE: "@",
   CODE_DARK: "=", CODE: "%", CODE_LIGHT: "%", AMBER: "!", CREAM: "!",
-  MINT: "!", HOT: "!", PINK: "!", INK: "+",
+  MINT: "!", HOT: "!", PINK: "!", PURPLE: "!", INK: "+",
+  GROUND_DARK: "=", GROUND: "=", GROUND_LIGHT: "=",
 }
 
 
