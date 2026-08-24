@@ -4,16 +4,19 @@ Turn a Divoom Ditoo Pro into a physical status light for
 [Claude Code](https://claude.com/claude-code): the 16x16 display shows whether
 Claude is working, waiting on you, or idle.
 
+The character is **Clawd**, Claude Code's pixel crab.
+
 | State | When | Animation |
 |---|---|---|
-| `working` | you submit a prompt, or Claude runs any tool | cyan; eyes scan back and forth over a filling progress bar |
-| `alerting` | Claude needs your input (permission prompt, question) | red; wide eyes pulse with flashing exclamation bars |
-| `chilling` | Claude finished responding | green; resting eyes, soft smile, slow breathing bob |
+| `working` | you submit a prompt, or Claude runs any tool | claws alternate on the keys, eyes down, bar sweeping |
+| `alerting` | Claude needs your input (permission prompt, question) | both claws waving overhead, wide eyes, red pulse |
+| `chilling` | Claude finished responding | napping -- eyes shut, breathing bob, a z drifting off |
 | `off` | manual only | blank display |
 
-The faces are **animated** -- 6 to 8 frames each, played on the device. At 16x16
-colour does most of the work of telling states apart across a room, and motion
-does the rest; the shapes only resolve up close.
+Clawd keeps his Claude orange in every state so he reads as the same character;
+the state is carried by the background wash, his pose, and the motion. At 16x16
+colour is what you catch across a room and motion is what you catch at a
+glance -- the silhouette only resolves up close.
 
 The point is the `alerting` state: you can look away from the terminal and still
 notice the moment Claude is blocked on you.
@@ -103,17 +106,23 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 (`working.gif`, `alerting.gif`, `chilling.gif`). A same-named `.png` is used as a
 single-frame fallback if no GIF exists.
 
-To edit the bundled ones, change the component calls in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it:
+To edit the bundled ones, change the frame definitions in
+[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The sprite
+itself lives in [`faces/clawd.py`](faces/clawd.py), posed by five numbers --
+`body_y` bobs him, `claw_l`/`claw_r` raise each claw, `eye` picks
+open/down/closed/wide, `splay` widens his stance -- so no pose is drawn twice
+by hand:
 
 ```bash
 python3 faces/generate_faces.py --preview
 ```
 
-Faces are composed from named parts (`eye_open`, `eye_arc`, `mouth_smile`, ...)
-rather than hand-drawn grids, so retiming or restyling is a few numbers. The
-script prints an ASCII preview and, with `--preview`, writes 320x320
-`*_preview.gif` files you can watch without squinting.
+The script prints an ASCII preview of each first frame and, with `--preview`,
+writes 320x320 `*_preview.gif` files you can watch without squinting.
+
+One animation trap worth knowing: give a pose cycle and a colour pulse the same
+period and they alias into a single flip. The alerting claws see-saw over 3
+positions against a 2-frame pulse for exactly that reason.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you

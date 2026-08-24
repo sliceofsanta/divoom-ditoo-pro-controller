@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Generate the animated 16x16 status faces shown on the Ditoo Pro.
 
-Stdlib only -- the GIF encoder lives in gifwriter.py -- so this runs anywhere
-without pip installs.
+The character is Clawd, Claude Code's pixel crab. He stays Claude orange in
+every state so he reads as the same character; the STATE is carried by the
+background wash, his pose, and the motion:
+
+    working   claws typing, eyes down, progress bar sweeping
+    alerting  both claws waving overhead, wide eyes, red pulse
+    chilling  napping -- eyes shut, slow breathing bob, drifting z
+
+Stdlib only (see clawd.py for the sprite and gifwriter.py for the encoder), so
+this runs anywhere without pip installs.
 
     python3 generate_faces.py            # write the GIFs (+ PNG fallbacks)
     python3 generate_faces.py --preview  # also write 320x320 preview GIFs
-
-Each face is built from components (eyes, mouth, extras) rather than hand-drawn
-grids, so retiming or restyling an animation means editing a few numbers.
-
-16x16 is a severe canvas: colour does most of the work of telling states apart
-across a room, and motion does the rest. Shapes only resolve up close.
 """
 
 import argparse
@@ -20,164 +22,93 @@ import struct
 import sys
 import zlib
 
+import clawd
+from clawd import SIZE, draw, px, hline
 from gifwriter import write_gif
 
-SIZE = 16
+# Backgrounds: dark enough that Clawd's orange stays the brightest thing.
+BG_CHILL = (0, 20, 13)
+BG_WORK = (0, 14, 28)
+BG_ALERT_HOT = (86, 0, 0)
+BG_ALERT_COOL = (24, 0, 0)
 
-# Eye slots: two 4-wide columns with a 2px gap.
-EYE_L = 3
-EYE_R = 9
+BAR_TRACK = (0, 52, 74)
+BAR_FILL = (120, 226, 255)
+ZZZ = (90, 170, 130)
+ALERT_FLASH = (255, 226, 150)
 
-
-# --- drawing helpers -------------------------------------------------------
-
-def blank(bg):
-  return [[bg] * SIZE for _ in range(SIZE)]
-
-
-def rect(px, x, y, w, h, colour):
-  for yy in range(y, y + h):
-    if not 0 <= yy < SIZE:
-      continue
-    for xx in range(x, x + w):
-      if 0 <= xx < SIZE:
-        px[yy][xx] = colour
-
-
-def dot(px, x, y, colour):
-  if 0 <= x < SIZE and 0 <= y < SIZE:
-    px[y][x] = colour
-
-
-def eye_open(px, x, y, colour, gaze=0):
-  """Open eye, 2px pupil that can look left (-1), centre (0) or right (+1)."""
-  rect(px, x + 1 + gaze, y, 2, 3, colour)
-
-
-def eye_wide(px, x, y, white, pupil):
-  """Startled eye: 4x4 white with a 2x2 pupil."""
-  rect(px, x, y, 4, 4, white)
-  rect(px, x + 1, y + 1, 2, 2, pupil)
-
-
-def eye_arc(px, x, y, colour):
-  """Content, closed eye -- a small ^ arc."""
-  dot(px, x + 1, y, colour)
-  dot(px, x + 2, y, colour)
-  dot(px, x, y + 1, colour)
-  dot(px, x + 3, y + 1, colour)
-
-
-def eye_line(px, x, y, colour):
-  """Fully shut eye."""
-  rect(px, x, y, 4, 1, colour)
-
-
-def mouth_smile(px, y, colour):
-  dot(px, 4, y, colour)
-  dot(px, 11, y, colour)
-  rect(px, 5, y + 1, 6, 1, colour)
-
-
-def mouth_flat(px, y, colour):
-  rect(px, 6, y, 4, 1, colour)
-
-
-def mouth_open(px, y, colour):
-  rect(px, 6, y, 4, 1, colour)
-  dot(px, 5, y + 1, colour)
-  dot(px, 10, y + 1, colour)
-  rect(px, 6, y + 2, 4, 1, colour)
-
-
-# --- the faces -------------------------------------------------------------
 
 def chilling_frames():
-  """Idle: resting eyes, soft smile, a slow breathing bob and one peek."""
-  bg = (0, 10, 7)
-  fg = (54, 200, 122)
-  dim = (24, 92, 58)
-
-  # Breathing: 1px down through the middle of the loop, then back up.
+  """Napping: eyes shut, a slow breathing bob, and a z drifting up."""
   bob = [0, 0, 1, 1, 1, 0, 0, 0]
   frames = []
   for i, offset in enumerate(bob):
-    px = blank(bg)
-    eye_y = 6 + offset
-    if i == 6:
-      # A brief peek, so the face reads as resting rather than switched off.
-      eye_open(px, EYE_L, eye_y - 1, fg)
-      eye_open(px, EYE_R, eye_y - 1, fg)
-    else:
-      eye_arc(px, EYE_L, eye_y, fg)
-      eye_arc(px, EYE_R, eye_y, fg)
-    mouth_smile(px, 10 + offset, fg)
-    # A dim floor line gives the bob something to move against.
-    rect(px, 4, 14, 8, 1, dim)
-    frames.append(px)
+    eye = "open" if i == 5 else "closed"  # one brief peek per loop
+    grid = draw(BG_CHILL, body_y=5 + offset, eye=eye)
+    # A small z climbing away from him, fading at the top of its rise.
+    zy = 3 - i // 3
+    if i < 6:
+      colour = ZZZ if i < 3 else (60, 115, 88)
+      hline(grid, 11, 13, zy, colour)
+      px(grid, 13, zy + 1, colour)
+      px(grid, 12, zy + 1, colour)
+      hline(grid, 11, 13, zy + 2, colour)
+    frames.append(grid)
   return frames, [220] * len(frames)
 
 
 def working_frames():
-  """Busy: eyes scanning back and forth over a filling progress bar."""
-  bg = (0, 9, 16)
-  fg = (0, 190, 226)
-  bar = (150, 240, 255)
-  track = (0, 58, 78)
-
-  gazes = [0, -1, -1, 0, 1, 1, 0, 0]
+  """Typing: claws alternate on the keys while a bar sweeps underneath."""
+  poses = [(-2, 1), (-2, 1), (1, -2), (1, -2), (-2, 1), (-2, 1), (1, -2), (1, -2)]
   frames = []
-  for i, gaze in enumerate(gazes):
-    px = blank(bg)
-    eye_open(px, EYE_L, 5, fg, gaze)
-    eye_open(px, EYE_R, 5, fg, gaze)
-    mouth_flat(px, 10, fg)
-    # Progress bar sweeps left to right and restarts -- motion, not real progress.
-    rect(px, 2, 13, 12, 1, track)
-    filled = int(round(12 * (i + 1) / len(gazes)))
+  for i, (left, right) in enumerate(poses):
+    grid = draw(BG_WORK, body_y=5, claw_l=left, claw_r=right, eye="down")
+    hline(grid, 2, 13, 14, BAR_TRACK)
+    filled = int(round(12 * (i + 1) / len(poses)))
     if filled:
-      rect(px, 2, 13, filled, 1, bar)
-    frames.append(px)
+      hline(grid, 2, 1 + filled, 14, BAR_FILL)
+    frames.append(grid)
   return frames, [130] * len(frames)
 
 
 def alerting_frames():
-  """Blocked on you: wide eyes, open mouth, urgent pulse with flashing bars."""
-  bg_bright = (34, 0, 0)
-  bg_dim = (12, 0, 0)
-  red = (255, 58, 48)
-  red_dim = (150, 30, 26)
-  white = (255, 236, 180)
-  pupil = (60, 0, 0)
+  """Waving for your attention: both claws overhead, urgent red pulse.
 
+  The claws see-saw rather than flapping in unison, and the sparks move between
+  hot frames -- with both on the same 2-frame period the animation collapses
+  into a single flip.
+  """
+  waves = [(-4, -2), (-3, -3), (-2, -4), (-3, -3), (-4, -2), (-3, -3)]
+  spark_sets = [
+    ((0, 0), (15, 0)),                      # top
+    (),
+    ((0, 15), (15, 15)),                    # bottom
+    (),
+    ((0, 0), (15, 0), (0, 15), (15, 15)),   # all four
+    (),
+  ]
   frames = []
-  for i in range(6):
+  for i, (left, right) in enumerate(waves):
     hot = i % 2 == 0
-    bg = bg_bright if hot else bg_dim
-    face = red if hot else red_dim
-    px = blank(bg)
-    eye_wide(px, EYE_L, 4, white if hot else red, pupil)
-    eye_wide(px, EYE_R, 4, white if hot else red, pupil)
-    mouth_open(px, 10, face)
-    if hot:
-      # Exclamation bars in the margins, flashing with the pulse.
-      rect(px, 0, 3, 1, 5, face)
-      dot(px, 0, 9, face)
-      rect(px, 15, 3, 1, 5, face)
-      dot(px, 15, 9, face)
-    frames.append(px)
+    grid = draw(
+      BG_ALERT_HOT if hot else BG_ALERT_COOL,
+      body_y=6, claw_l=left, claw_r=right, eye="wide", splay=1
+    )
+    for cx, cy in spark_sets[i]:
+      px(grid, cx, cy, ALERT_FLASH)
+    frames.append(grid)
   return frames, [110] * len(frames)
 
 
 def off_frames():
   black = (0, 0, 0)
-  return [blank(black)], [500]
+  return [[[black] * SIZE for _ in range(SIZE)]], [500]
 
 
 FACES = {
-  "chilling": (chilling_frames, "idle -- resting eyes, soft smile, breathing"),
-  "working": (working_frames, "busy -- scanning eyes over a filling bar"),
-  "alerting": (alerting_frames, "blocked on you -- pulsing red, wide eyes"),
+  "chilling": (chilling_frames, "napping -- eyes shut, breathing bob, drifting z"),
+  "working": (working_frames, "typing -- claws on the keys, bar sweeping"),
+  "alerting": (alerting_frames, "waving both claws, wide eyes, red pulse"),
   "off": (off_frames, "blank display"),
 }
 
@@ -185,10 +116,7 @@ FACES = {
 # --- output ----------------------------------------------------------------
 
 def index_frames(frames):
-  """Colour grids -> (indexed frames, palette)."""
-  palette = []
-  lookup = {}
-  indexed = []
+  palette, lookup, indexed = [], {}, []
   for frame in frames:
     rows = []
     for row in frame:
@@ -214,7 +142,6 @@ def scale(frame, factor):
 
 
 def write_png(path, frame):
-  """First frame as a PNG, so the display still works without GIF support."""
   raw = b""
   for row in frame:
     raw += b"\x00" + b"".join(bytes(c) for c in row)
@@ -233,11 +160,20 @@ def write_png(path, frame):
     handle.write(png)
 
 
-def ascii_preview(frame, bg):
-  lines = []
+CHARS = {
+  clawd.CLAWD: "#", clawd.CLAWD_DARK: "+", clawd.CLAWD_LIGHT: "*",
+  clawd.EYE_WHITE: "O", clawd.EYE_DARK: "o",
+  BAR_FILL: "=", BAR_TRACK: "-", ZZZ: "z", ALERT_FLASH: "!",
+}
+
+
+def ascii_preview(frame):
+  counts = {}
   for row in frame:
-    lines.append("".join("." if c == bg else "#" for c in row))
-  return lines
+    for colour in row:
+      counts[colour] = counts.get(colour, 0) + 1
+  bg = max(counts, key=counts.get)
+  return ["".join("." if c == bg else CHARS.get(c, "?") for c in row) for row in frame]
 
 
 def main():
@@ -258,7 +194,7 @@ def main():
     print(f"{name:9s} {doc}")
     print(f"    {len(frames)} frames, {delays[0]}ms each, "
           f"{len(palette)} colours, {size} bytes")
-    for line in ascii_preview(frames[0], frames[0][0][0]):
+    for line in ascii_preview(frames[0]):
       print(f"    {line}")
     print(f"    -> {gif_path}")
 
