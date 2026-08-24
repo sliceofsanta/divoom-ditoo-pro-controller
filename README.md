@@ -182,8 +182,8 @@ cargo install --path . --no-default-features --features all-image-formats
 
 # Claude Code status display
 
-Use the display as a physical status light for Claude Code -- it shows when
-Claude is working, waiting on your input, or idle. See
+Use the display as a physical progress screen for Claude Code -- the animated
+mascot thinks, works, asks for input, celebrates, fails, and chills. See
 [integrations/claude-code](integrations/claude-code/README.md).
 
 # Documentation

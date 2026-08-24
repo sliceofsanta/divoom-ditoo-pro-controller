@@ -1,8 +1,8 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into a physical status light for
+Turn a Divoom Ditoo Pro into a physical progress screen for
 [Claude Code](https://claude.com/claude-code): the 16x16 display shows whether
-Claude is working, waiting on you, or idle.
+Claude is thinking, working, waiting on you, done, failed, or idle.
 
 The character is **Claude's mascot** -- the stocky four-legged fellow from the
 marketing site. He keeps his own colour throughout; what changes is what he is
@@ -10,17 +10,23 @@ doing.
 
 | State | When | Animation |
 |---|---|---|
-| `working` | you submit a prompt, or Claude runs any tool | marching on the spot, hands swinging, eyes darting |
-| `alerting` | Claude needs your input (permission prompt, question) | jumping up and down with both hands overhead |
-| `chilling` | Claude finished responding | idling -- breathing, glancing about, blinking |
-| `off` | manual only | blank display |
+| `thinking` | you submit a prompt | follows three orbiting ideas and taps his chin |
+| `working` | Claude runs a tool | hammers on a tiny cyan keyboard, code sparks flying |
+| `alerting` | Claude needs your input | weighted hop under a pulsing exclamation mark |
+| `success` | Claude finished responding | the confetti stomp from the original mascot clips |
+| `error` | a tool or the turn failed | slumps with X eyes and a red glitch spark |
+| `chilling` | a session starts, or manual | slow breathing with a tiny steaming mug |
+| `off` | the session ends, or manual | blank display |
 
 The mascot is built entirely from `<rect>` elements -- no paths, no curves --
-which is the happy reason he survives being squeezed onto 256 LEDs. Scaling him
-down is a reduction, not a reinterpretation.
+which is the happy reason he survives being squeezed onto 256 LEDs. The body
+keeps the source `#DD775B`, four-leg proportions, and block construction in
+every state. Each state gets one strong prop and a different action silhouette
+instead of recolouring the mascot.
 
-The point is the `alerting` state: you can look away from the terminal and still
-notice the moment Claude is blocked on you.
+The point is still the `alerting` state: you can look away from the terminal and
+notice the moment Claude is blocked on you. The other poses turn the display
+from a status light into a tiny desk companion.
 
 ## The daemon (read this first)
 
@@ -78,7 +84,8 @@ the main [README](../../README.md).
 **3. Check the script works** before wiring it into hooks:
 
 ```bash
-./integrations/claude-code/ditoo-state.sh working
+./integrations/claude-code/ditoo-state.sh thinking
+./integrations/claude-code/ditoo-state.sh success
 ./integrations/claude-code/ditoo-state.sh status
 ```
 
@@ -98,19 +105,36 @@ checkout. The `SessionStart` entry is what starts the daemon:
     ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "async": true,
-        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh working" }] }
+        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh thinking" }] }
     ],
     "PreToolUse": [
       { "hooks": [{ "type": "command", "async": true,
         "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh working" }] }
     ],
-    "Notification": [
+    "PermissionRequest": [
       { "hooks": [{ "type": "command", "async": true,
         "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh alerting" }] }
     ],
+    "Notification": [
+      { "matcher": "permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog",
+        "hooks": [{ "type": "command", "async": true,
+        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh alerting" }] }
+    ],
+    "PostToolUseFailure": [
+      { "hooks": [{ "type": "command", "async": true,
+        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh error" }] }
+    ],
     "Stop": [
       { "hooks": [{ "type": "command", "async": true,
-        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh chilling" }] }
+        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh success" }] }
+    ],
+    "StopFailure": [
+      { "hooks": [{ "type": "command", "async": true,
+        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh error" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "async": true,
+        "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-state.sh off" }] }
     ]
   }
 }
@@ -127,7 +151,7 @@ All optional, set as environment variables:
 |---|---|---|
 | `DITOO_BIN` | PATH, then `target/release`, then `target/debug` | controller binary |
 | `DITOO_DEVICE` | auto-detect | MAC address, when several Ditoos are paired |
-| `DITOO_FACES_DIR` | `faces/` next to the script | where the PNGs live |
+| `DITOO_FACES_DIR` | `faces/` next to the script | where the GIF/PNG faces live |
 | `DITOO_RUNDIR` | `~/.claude/ditoo` | state files and log |
 | `DITOO_OFF_CLOCK_ID` | unset | make `off` restore this clock face instead of blanking |
 | `DITOO_RUST_LOG` | `warn` | controller log level; set `debug` to diagnose device problems |
@@ -137,8 +161,9 @@ All optional, set as environment variables:
 ## Custom faces
 
 Drop your own 16x16 animated GIF into `faces/` named after the state
-(`working.gif`, `alerting.gif`, `chilling.gif`). A same-named `.png` is used as a
-single-frame fallback if no GIF exists.
+(`thinking.gif`, `working.gif`, `alerting.gif`, `success.gif`, `error.gif`, or
+`chilling.gif`). A same-named `.png` is used as a single-frame fallback if no
+GIF exists.
 
 To edit the bundled ones, change the frame definitions in
 [`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The sprite
@@ -151,20 +176,25 @@ the eyes:
 python3 faces/generate_faces.py --preview
 ```
 
-The script prints an ASCII preview of each first frame and, with `--preview`,
-writes 320x320 `*_preview.gif` files you can watch without squinting.
+The script validates every frame, prints an ASCII preview of each first frame,
+and, with `--preview`, writes 320x320 `*_preview.gif` and `*_preview.png` files
+you can inspect without squinting.
 
 Two things worth knowing before you retime anything. Lock two motions to the
-same period and the loop flattens into a single repeat -- the first cut of the
-march put the legs and the bob on the same beat and eight frames collapsed into
-four; the legs and the gaze now run on deliberately different beats. And the
-squash at each end of the jump is what gives it weight: without it he simply
-teleports up and back.
+same period and the loop flattens into a single repeat, so the working hands,
+legs, gaze, and sparks run on deliberately different beats. And the asymmetric
+timing plus squash at each end of a jump is what gives it weight: without the
+short launch and held apex, he simply teleports up and back.
 
 Proportions in `mascot.py` come from the source SVG -- four legs 11 units wide
 at x = 11, 32, 64 and 85, which scale to columns 2-3, 5-6, 9-10 and 12-13. The
 hands are deliberately a single pixel hard against each edge: two pixels wide
 and they touch the body, and all three merge into one bar.
+
+The pose timing follows the weighted movement described in Codrops'
+[frame-by-frame mascot study](https://tympanus.net/codrops/2026/05/05/reverse-engineering-claude-ais-mascot-animations-with-svg-and-gsap/):
+limbs move as one beat, launch and landing use different timing, and the apex
+holds for a moment instead of sweeping evenly through the loop.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you
@@ -206,10 +236,12 @@ failure is logged to `$DITOO_RUNDIR/log` and never disrupts Claude Code.
   the same device, last writer wins. The daemon at least makes them share one
   connection; it does not merge their states.
 - **~3 second lag without the daemon**, because each change connects afresh.
-  With the daemon a change lands in well under a second -- each face is only
-  700-950 bytes, so the transfer was never the bottleneck, the connection was.
-- **No `SessionEnd` hook is wired** by default, so the last state stays on the
-  display after you quit. Add one calling `off` if you would rather it blank.
+  With the daemon a change lands in well under a second -- every encoded face
+  is under about 1.3 KB, so the transfer was never the bottleneck, the
+  connection was.
+- **`SessionEnd` blanks the display but leaves the daemon alive** so another
+  Claude Code window can reuse the connection. Run `ditoo-state.sh stop` when
+  you are done with the device entirely.
 
 Still open: merging states across concurrent sessions, and animations that
 respond to what Claude is actually doing rather than looping a fixed clip. See

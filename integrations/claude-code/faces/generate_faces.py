@@ -27,7 +27,7 @@ import sys
 import zlib
 
 import mascot
-from mascot import BODY, BODY_DARK, SIZE, draw
+from mascot import BODY, SIZE, draw
 from gifwriter import write_gif
 
 # Near-black backgrounds keep the mascot brighter than its props on the LEDs.
