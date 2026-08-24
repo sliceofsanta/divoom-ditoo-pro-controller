@@ -144,6 +144,11 @@ Detailed docs live in `docs/`:
   connection reuse across commands, and connecting is slow (SDP profile
   registration + up to 3 attempts with 1s backoff). If you add a command that
   needs several round-trips, do them inside a single `send_*`.
+  `run_status_daemon` is the exception and the pattern to copy: it connects
+  once and holds the connection for its lifetime. That matters beyond speed --
+  the device plays its Bluetooth chime on every connect and disconnect, at a
+  fixed volume that `volume set 0` does not silence, so reconnecting per
+  command is audibly bad.
 - **`alarm on` / `alarm off` does not work.** `main.rs` parses and logs the
   `enable` flag but never passes it: `send_alarm()` in `lib.rs` hardcodes
   `enable: false` and a 13:37 time. The README/TODO claim this feature works.

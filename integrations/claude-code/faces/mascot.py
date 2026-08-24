@@ -11,6 +11,9 @@ starting at y = 60, body pivoting about (53, 65), fill #DD775B. Scaled to a
 16-wide grid that lands the legs on x = 2-3, 5-6, 9-10, 12-13 with the body
 spanning 2..13 -- symmetric, which the original very nearly is.
 
+Animation reference:
+https://tympanus.net/codrops/2026/05/05/reverse-engineering-claude-ais-mascot-animations-with-svg-and-gsap/
+
 Coordinates are (x, y), origin top-left, matching the display.
 """
 
@@ -42,17 +45,18 @@ def rect(grid, x0, y0, x1, y1, colour):
 
 
 def draw(bg, body_y=3, body_h=7, legs=(0, 0, 0, 0), hand_l=0, hand_r=0,
-         gaze=0, blink=False, squash=0, body=BODY, dark=BODY_DARK,
-         light=BODY_LIGHT):
+         gaze=0, blink=False, expression="open", squash=0, body=BODY,
+         dark=BODY_DARK, light=BODY_LIGHT):
   """Compose one frame.
 
   body_y   top row of the body; raise it to make him hop
   body_h   body height; `squash` shortens it and widens the stance instead
   legs     per-leg length in rows (0 = resting, +1 = extended, -1 = lifted)
-  hand_l   vertical offset of each hand; negative raises it
+  hand_l   vertical offset of each hand; negative raises it; None hides it
   hand_r
   gaze     -1, 0 or +1 -- which way he is looking
   blink    eyes shut
+  expression  open, happy, or x; blink takes precedence
   squash   1 flattens him a row, for the bottom of a hop
   """
   grid = blank(bg)
@@ -65,13 +69,23 @@ def draw(bg, body_y=3, body_h=7, legs=(0, 0, 0, 0), hand_l=0, hand_r=0,
   rect(grid, BODY_X0 + 1, top, BODY_X1 - 1, top, light)
   rect(grid, BODY_X0, bottom, BODY_X1, bottom, dark)
 
-  # Eyes sit a third of the way down and shift with the gaze. One pixel wide
-  # and two tall: a highlight pixel above reads as a second eye at this size.
+  # Eyes sit a third of the way down and shift with the gaze. The default is
+  # one pixel wide and two tall. Special expressions are deliberately chunky:
+  # one LED is too subtle to distinguish an error from an ordinary glance.
   eye_y = top + max(2, height // 2 - 1)
   for ex in (5, 10):
     x = ex + gaze
     if blink:
       px(grid, x, eye_y + 1, EYE)
+    elif expression == "happy":
+      px(grid, x - 1, eye_y, EYE)
+      px(grid, x, eye_y + 1, EYE)
+    elif expression == "x":
+      px(grid, x - 1, eye_y, EYE)
+      px(grid, x + 1, eye_y, EYE)
+      px(grid, x, eye_y + 1, EYE)
+      px(grid, x - 1, eye_y + 2, EYE)
+      px(grid, x + 1, eye_y + 2, EYE)
     else:
       px(grid, x, eye_y, EYE)
       px(grid, x, eye_y + 1, EYE)
@@ -87,6 +101,8 @@ def draw(bg, body_y=3, body_h=7, legs=(0, 0, 0, 0), hand_l=0, hand_r=0,
   # column beside the body stays empty and they read as separate from it --
   # a 2px hand touches the body and the three merge into one bar.
   for hx, offset in ((0, hand_l), (15, hand_r)):
+    if offset is None:
+      continue
     hy = top + height // 2 + offset
     rect(grid, hx, hy, hx, hy + 1, body)
   return grid

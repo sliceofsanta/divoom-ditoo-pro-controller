@@ -1,9 +1,7 @@
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
-#[cfg(feature = "text")]
 use std::path::Path;
-#[cfg(any(feature = "text", feature = "video"))]
 use std::time::Duration;
 #[cfg(feature = "video")]
 use std::thread;
@@ -362,6 +360,117 @@ pub async fn send_image(
     conn.fire_and_forget(packet).await?;
   }
   conn.disconnect().await?;
+  Ok(())
+}
+
+/// Run the status daemon: connect once, hold the connection, and apply state
+/// changes written to `state_file` (the name of an image in `faces_dir`,
+/// without extension).
+///
+/// This exists because connecting is expensive in every sense: it takes
+/// seconds, and on devices like the Ditoo Pro each connect/disconnect plays a
+/// chime that no volume setting silences. Holding one connection turns
+/// per-state-change chimes into a single pair at daemon start and stop.
+///
+/// Returns with an error if a send fails (the connection has usually died);
+/// the caller is expected to restart or fall back to one-shot commands.
+pub async fn run_status_daemon(
+  mac_address: Address,
+  state_file: &Path,
+  faces_dir: &Path
+) -> Result<(), Box<dyn Error>> {
+  let mut conn = DeviceConnection::connect(mac_address).await?;
+  info!(
+    "Status daemon connected; watching {} for states from {}",
+    state_file.display(),
+    faces_dir.display()
+  );
+
+  let applied_file = state_file.with_file_name("applied");
+  let mut applied: Option<String> = None;
+  let mut poll = tokio::time::interval(Duration::from_millis(250));
+
+  let ctrl_c = tokio::signal::ctrl_c();
+  tokio::pin!(ctrl_c);
+  #[cfg(unix)]
+  let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+  #[cfg(unix)]
+  let terminate = async move { sigterm.recv().await };
+  #[cfg(not(unix))]
+  let terminate = std::future::pending::<Option<()>>();
+  tokio::pin!(terminate);
+
+  loop {
+    tokio::select! {
+      _ = poll.tick() => {
+        let desired = std::fs::read_to_string(state_file)
+          .ok()
+          .map(|s| s.trim().to_string())
+          .filter(|s| !s.is_empty());
+        let Some(state) = desired else { continue };
+        if applied.as_deref() == Some(state.as_str()) {
+          continue;
+        }
+        // The state names a file; refuse anything that could leave faces_dir.
+        if !state.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+          info!("Ignoring invalid state name {:?}", state);
+          applied = Some(state);
+          continue;
+        }
+        match send_state(&mut conn, faces_dir, &state).await {
+          Ok(()) => {
+            info!("Applied state {}", state);
+            let _ = std::fs::write(&applied_file, format!("{}\n", state));
+            applied = Some(state);
+          }
+          Err(e) => {
+            conn.disconnect().await.ok();
+            return Err(format!("Failed to apply state {}: {}", state, e).into());
+          }
+        }
+      }
+      _ = &mut ctrl_c => {
+        info!("Interrupted, stopping status daemon");
+        break;
+      }
+      _ = &mut terminate => {
+        info!("Terminated, stopping status daemon");
+        break;
+      }
+    }
+  }
+
+  conn.disconnect().await?;
+  Ok(())
+}
+
+async fn send_state(
+  conn: &mut DeviceConnection,
+  faces_dir: &Path,
+  state: &str
+) -> Result<(), Box<dyn Error>> {
+  let gif = faces_dir.join(format!("{}.gif", state));
+  let png = faces_dir.join(format!("{}.png", state));
+  let path = if gif.exists() {
+    gif
+  } else if png.exists() {
+    png
+  } else {
+    return Err(
+      format!("no face image for state '{}' in {}", state, faces_dir.display()).into()
+    );
+  };
+
+  let animation = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif")) {
+    DivoomAnimation::from_gif(&mut BufReader::new(File::open(&path)?))?
+  } else {
+    DivoomAnimation::from_image(image::open(&path)?)?
+  };
+  let mut buf = Vec::new();
+  animation.save_to_divoom_format(&mut buf)?;
+  for packet in create_network_packets_from(&buf)? {
+    conn.fire_and_forget(&packet).await?;
+  }
   Ok(())
 }
 

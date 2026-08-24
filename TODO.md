@@ -74,8 +74,11 @@
 
 ### Integrations
 - [x] Claude Code status display (animated working/alerting/chilling faces via hooks)
-- [ ] Long-running daemon holding one connection -- would give sub-second state
-      changes, animated faces, no audio interruption, and multi-session merging
+- [x] Long-running daemon holding one connection (`daemon` subcommand) --
+      sub-second state changes, and one connect chime per daemon rather than
+      one per state change
+- [ ] Merge states across concurrent Claude Code sessions (alert > working >
+      chilling) rather than last-writer-wins
 - [ ] Investigate uploading faces once and switching with `clock set` (ext 0x14)
       for instant, connectionless-feeling switching
 

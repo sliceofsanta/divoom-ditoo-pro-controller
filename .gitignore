@@ -11,3 +11,7 @@ CLAUDE.local.md
 # generated previews for the Claude Code status faces (regenerate with
 # integrations/claude-code/faces/generate_faces.py --preview)
 **/faces/*_preview.*
+
+# Linux target dir used by the Docker CI check, kept separate so it does not
+# overwrite the host binary in /target
+/target-linux

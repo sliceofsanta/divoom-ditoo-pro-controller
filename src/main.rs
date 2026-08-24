@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-#[cfg(feature = "text")]
 use std::path::PathBuf;
 use chrono::NaiveDateTime;
 use clap::{Parser, Subcommand};
@@ -12,7 +11,7 @@ use divoom_ditoo_pro_controller::divoom_file_format::animation::Animation;
 use divoom_ditoo_pro_controller::divoom_file_format::frame::bits_per_pixel;
 use divoom_ditoo_pro_controller::Address;
 use divoom_ditoo_pro_controller::{
-  find_paired_ditoo_pro_devices, scan_devices, list_paired_devices, send_alarm,
+  find_paired_ditoo_pro_devices, run_status_daemon, scan_devices, list_paired_devices, send_alarm,
   send_divoom_animation, send_get_clock_face, send_get_volume, send_image,
   send_keyboard_backlight, send_set_brightness,
   send_set_box_mode, send_set_clock_face, send_set_datetime, send_set_language,
@@ -163,6 +162,16 @@ enum Command {
     action: KeyboardBacklightAction
   },
 
+  /// Hold one connection open and apply state changes written to a file.
+  /// Avoids the per-command connect/disconnect (and the chime devices play
+  /// for it); used by the Claude Code status integration.
+  Daemon {
+    /// File whose contents name the desired state (e.g. "working")
+    state_file: PathBuf,
+    /// Directory containing <state>.gif or <state>.png images
+    faces_dir: PathBuf
+  },
+
   /// Toggle the alarm
   Alarm {
     #[arg(required = true, number_of_values = 1, value_parser = clap::builder::BoolishValueParser::new())]
@@ -290,6 +299,15 @@ fn resolve_font(font: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
         .ok_or("No monospace font found; use --font")?;
       Ok(font.path.clone())
     }
+  }
+}
+
+/// Deletes the wrapped path when dropped; used for the daemon's pid file.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+  fn drop(&mut self) {
+    let _ = std::fs::remove_file(&self.0);
   }
 }
 
@@ -529,6 +547,32 @@ async fn run() -> Result<(), Box<dyn Error>> {
       };
       info!("Keyboard backlight: {:?}", action);
       send_keyboard_backlight(mac, mode).await?
+    }
+    Command::Daemon { state_file, faces_dir } => {
+      let mac = resolve_device(args.device).await?;
+      // One daemon per state file: the pid file next to it is both the
+      // single-instance guard and how scripts find us. Stale files (a killed
+      // daemon) are cleaned up by the caller; see integrations/claude-code.
+      let pid_file = state_file.with_file_name("daemon.pid");
+      let mut options = std::fs::OpenOptions::new();
+      options.write(true).create_new(true);
+      let pid_guard = match options.open(&pid_file) {
+        Ok(mut file) => {
+          use std::io::Write;
+          writeln!(file, "{}", std::process::id())?;
+          RemoveOnDrop(pid_file)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+          return Err(format!(
+            "Another daemon appears to be running ({} exists). \
+             If it is not, delete the file and retry.",
+            pid_file.display()
+          ).into());
+        }
+        Err(e) => return Err(e.into())
+      };
+      info!("Starting status daemon (pid file {})", pid_guard.0.display());
+      run_status_daemon(mac, &state_file, &faces_dir).await?
     }
     Command::Alarm { enable } => {
       let mac = resolve_device(args.device).await?;

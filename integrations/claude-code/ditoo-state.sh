@@ -30,6 +30,7 @@ DESIRED="$RUNDIR/desired"
 APPLIED="$RUNDIR/applied"
 LOCK="$RUNDIR/lock"
 LOG="$RUNDIR/log"
+PIDFILE="$RUNDIR/daemon.pid"
 
 # Lock older than this is assumed to belong to a dead worker.
 STALE_LOCK_SECONDS="${DITOO_STALE_LOCK_SECONDS:-90}"
@@ -77,6 +78,21 @@ file_mtime() {
 
 read_state_file() {
   cat "$1" 2>/dev/null || printf ''
+}
+
+# True when a daemon holds the connection. A pid file whose process is gone is
+# stale (killed daemon, reboot) and is cleared so we fall back to one-shot
+# sends rather than silently doing nothing.
+daemon_running() {
+  [ -f "$PIDFILE" ] || return 1
+  local pid
+  pid="$(cat "$PIDFILE" 2>/dev/null)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+  log "clearing stale daemon pid file (pid ${pid:-unknown} is gone)"
+  rm -f "$PIDFILE"
+  return 1
 }
 
 # --- the worker ------------------------------------------------------------
@@ -176,7 +192,56 @@ case "${1:-}" in
     run_worker
     exit 0
     ;;
+  start)
+    if daemon_running; then
+      printf 'daemon already running (pid %s)\n' "$(cat "$PIDFILE")"
+      exit 0
+    fi
+    if ! BIN="$(resolve_bin)"; then
+      printf 'controller binary not found (build it, or set DITOO_BIN)\n' >&2
+      exit 1
+    fi
+    printf '%s\n' "${DITOO_START_STATE:-chilling}" >"$DESIRED"
+    rm -f "$APPLIED"
+    rotate_log
+    if [ -n "${DITOO_DEVICE:-}" ]; then
+      nohup "$BIN" --device "$DITOO_DEVICE" daemon "$DESIRED" "$FACES_DIR" >>"$LOG" 2>&1 &
+    else
+      nohup "$BIN" daemon "$DESIRED" "$FACES_DIR" >>"$LOG" 2>&1 &
+    fi
+    # The daemon writes the pid file itself; wait briefly so `start` only
+    # reports success once it has actually claimed it.
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+      if daemon_running; then
+        printf 'daemon started (pid %s)\n' "$(cat "$PIDFILE")"
+        exit 0
+      fi
+      sleep 1
+    done
+    printf 'daemon did not start; see %s\n' "$LOG" >&2
+    exit 1
+    ;;
+  stop)
+    if ! daemon_running; then
+      printf 'no daemon running\n'
+      exit 0
+    fi
+    pid="$(cat "$PIDFILE")"
+    kill "$pid" 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+    rm -f "$PIDFILE"
+    printf 'daemon stopped\n'
+    exit 0
+    ;;
   status)
+    if daemon_running; then
+      printf 'daemon  : running (pid %s) -- one held connection, no chime\n' "$(cat "$PIDFILE")"
+    else
+      printf 'daemon  : not running -- each change reconnects (device will chime)\n'
+    fi
     printf 'desired : %s\n' "$(read_state_file "$DESIRED")"
     printf 'applied : %s\n' "$(read_state_file "$APPLIED")"
     if [ -d "$LOCK" ]; then
@@ -194,12 +259,19 @@ case "${1:-}" in
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s working|alerting|chilling|off|status\n' "$(basename "$SELF")" >&2
+    printf 'usage: %s working|alerting|chilling|off|start|stop|status\n' "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac
 
 printf '%s\n' "$STATE" >"$DESIRED" 2>/dev/null
+
+# If the daemon is running it is watching $DESIRED, which we just wrote, so
+# there is nothing else to do. This is the whole point of the daemon: no
+# connect, no disconnect, and none of the chime the device plays for them.
+if daemon_running; then
+  exit 0
+fi
 
 # Fast path: nothing to do. This is the common case (PreToolUse firing
 # repeatedly while already "working"), so it must not fork anything.
