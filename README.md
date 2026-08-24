@@ -161,6 +161,33 @@ divoom-ditoo-pro-controller debug-image ./images/witch.divoom16
 Please note the Bluetooth adapter is chosen automatically.
 There is currently no way to configure it.
 
+# macOS
+
+macOS is supported natively via IOBluetooth (Linux uses BlueZ). Differences:
+
+- `scan` is not implemented -- pair the device in System Settings > Bluetooth,
+  then use `devices` / auto-detection as usual.
+- The app you run the tool from (Terminal, iTerm, your IDE) needs a one-time
+  Bluetooth grant in **System Settings > Privacy & Security > Bluetooth**.
+  Without it the process is killed by macOS the moment it touches Bluetooth.
+- Sending a command briefly interrupts Bluetooth audio playback on the device:
+  macOS cannot open the control channel while the audio profiles are active, so
+  the tool closes the audio link first.
+- The `text` and `video` features need `fontconfig` and `mpv` from Homebrew;
+  without them, install with:
+
+```bash
+cargo install --path . --no-default-features --features all-image-formats
+```
+
+# Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) -- module map, data flow, connection lifecycle
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) -- SPP wire framing, opcode table, per-command payloads
+- [docs/FILE_FORMAT.md](docs/FILE_FORMAT.md) -- the `.divoom16` binary format
+- [CLAUDE.md](CLAUDE.md) -- orientation for AI coding agents
+- [TODO.md](TODO.md) -- implemented vs. not-yet-implemented features
+
 # Development
 
 See [Development.md](Development.md).

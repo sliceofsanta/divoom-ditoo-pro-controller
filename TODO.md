@@ -74,4 +74,5 @@
 
 ### Protocol
 - [ ] JSON-based command protocol (SPP_JSON)
-- [ ] Configurable Bluetooth adapter selection
+- [ ] Configurable Bluetooth adapter selection (Linux)
+- [ ] Bluetooth scanning on macOS (pair via System Settings and use `devices` for now)

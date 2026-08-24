@@ -2,7 +2,7 @@ use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use bluer::Address;
+use crate::Address;
 use libmpv2_sys::*;
 
 unsafe extern "C" fn update_callback(cb_ctx: *mut std::os::raw::c_void) {

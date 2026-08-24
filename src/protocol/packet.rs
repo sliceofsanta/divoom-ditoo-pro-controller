@@ -107,6 +107,8 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
+  #![allow(clippy::unwrap_used)]
+
   use super::*;
 
   fn build_response(cmd: u8, ack: u8, data: &[u8]) -> Vec<u8> {

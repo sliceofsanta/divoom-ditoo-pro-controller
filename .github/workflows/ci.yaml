@@ -20,3 +20,14 @@ jobs:
       - run: cargo check --no-default-features
       - run: cargo build --verbose --release --all-features
       - run: cargo test --verbose --all
+  build_and_test_macos:
+    name: Rust Cargo Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      # fontconfig/libmpv are not preinstalled on the runner, so build without
+      # the text and video features; all-image-formats keeps the image codecs.
+      - run: cargo clippy --all-targets --no-default-features --features all-image-formats -- --deny warnings
+      - run: cargo build --verbose --no-default-features --features all-image-formats
+      - run: cargo test --verbose --no-default-features --features all-image-formats
