@@ -11,7 +11,7 @@ use chrono::{NaiveDateTime, NaiveTime};
 use image::{DynamicImage, Rgb, RgbImage};
 #[cfg(feature = "video")]
 use indexmap::IndexSet;
-use log::info;
+use log::{debug, info};
 #[cfg(feature = "video")]
 use tokio::sync::mpsc;
 
@@ -363,6 +363,87 @@ pub async fn send_image(
   Ok(())
 }
 
+/// Timings that govern how a state is presented over time. Defaults are the
+/// sensible ones; every field can be overridden by an environment variable,
+/// which is what makes the escalation path testable without sitting through
+/// five real minutes.
+#[derive(Debug, Clone, Copy)]
+pub struct Timings {
+  /// How long a blocked alert runs before it escalates. Escalation is what
+  /// makes the alert useful: quiet enough to ignore for a minute, impossible
+  /// to ignore after five.
+  pub alert_escalate: Duration,
+  pub alert_panic: Duration,
+  /// Success and error are events, not conditions -- they play, then the
+  /// display falls back to idle rather than sitting on a stale verdict.
+  pub transient: Duration,
+  /// A celebration has to be earned or it stops meaning anything. A turn that
+  /// finishes in seconds just goes quietly idle.
+  pub celebrate_after: Duration
+}
+
+impl Default for Timings {
+  fn default() -> Self {
+    Timings {
+      alert_escalate: Duration::from_secs(60),
+      alert_panic: Duration::from_secs(300),
+      transient: Duration::from_secs(6),
+      celebrate_after: Duration::from_secs(600)
+    }
+  }
+}
+
+impl Timings {
+  /// Override any field from the environment; anything unset or unparseable
+  /// keeps its default.
+  pub fn from_env() -> Self {
+    fn secs(key: &str, fallback: Duration) -> Duration {
+      std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(fallback)
+    }
+    let base = Timings::default();
+    Timings {
+      alert_escalate: secs("DITOO_ALERT_ESCALATE_SECS", base.alert_escalate),
+      alert_panic: secs("DITOO_ALERT_PANIC_SECS", base.alert_panic),
+      transient: secs("DITOO_TRANSIENT_SECS", base.transient),
+      celebrate_after: secs("DITOO_CELEBRATE_AFTER_SECS", base.celebrate_after)
+    }
+  }
+}
+
+/// States that mean "Claude is doing something", for the purpose of deciding
+/// whether a finish was worth celebrating.
+fn is_busy(state: &str) -> bool {
+  matches!(state, "thinking" | "working" | "compacting")
+}
+
+/// Decide what a finish actually means. Only `success` is gated: a celebration
+/// has to be earned or it stops carrying information, so a turn that wrapped
+/// up in seconds goes quietly idle instead. Every other state passes through.
+fn resolve_finish<'a>(state: &'a str, worked_for: Duration, timings: &Timings) -> &'a str {
+  if state == "success" && worked_for < timings.celebrate_after {
+    "chilling"
+  } else {
+    state
+  }
+}
+
+/// Map a requested state plus how long it has been held onto the face to show.
+///
+/// This is where time-dependent behaviour lives, so the hooks stay dumb: they
+/// report what happened and the daemon decides how to present it.
+fn present<'a>(state: &'a str, held: Duration, timings: &Timings) -> &'a str {
+  match state {
+    "alerting" if held >= timings.alert_panic => "alerting3",
+    "alerting" if held >= timings.alert_escalate => "alerting2",
+    "success" | "error" if held >= timings.transient => "chilling",
+    other => other
+  }
+}
+
 /// Run the status daemon: connect once, hold the connection, and apply state
 /// changes written to `state_file` (the name of an image in `faces_dir`,
 /// without extension).
@@ -387,7 +468,22 @@ pub async fn run_status_daemon(
   );
 
   let applied_file = state_file.with_file_name("applied");
-  let mut applied: Option<String> = None;
+  // `requested` is what the hooks asked for; `displayed` is the face actually
+  // on the panel. They differ whenever a state is being presented over time --
+  // an alert that has escalated, or a verdict that has decayed to idle.
+  // `last_seen` is the raw value from the file; `requested` is what it
+  // resolved to. They differ whenever resolution rewrites a state (an unearned
+  // success becoming idle), and comparing the file against the RESOLVED value
+  // would then re-enter this branch on every tick -- resetting the timer and
+  // losing the work duration.
+  let mut last_seen = String::new();
+  let mut requested = String::new();
+  let mut requested_since = tokio::time::Instant::now();
+  let mut displayed: Option<String> = None;
+  let mut busy_since: Option<tokio::time::Instant> = None;
+  let mut worked_for = Duration::ZERO;
+  let timings = Timings::from_env();
+  debug!("Status daemon timings: {:?}", timings);
   let mut poll = tokio::time::interval(Duration::from_millis(250));
 
   let ctrl_c = tokio::signal::ctrl_c();
@@ -407,25 +503,48 @@ pub async fn run_status_daemon(
           .ok()
           .map(|s| s.trim().to_string())
           .filter(|s| !s.is_empty());
-        let Some(state) = desired else { continue };
-        if applied.as_deref() == Some(state.as_str()) {
-          continue;
-        }
+        let Some(mut state) = desired else { continue };
+
         // The state names a file; refuse anything that could leave faces_dir.
         if !state.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
           info!("Ignoring invalid state name {:?}", state);
-          applied = Some(state);
           continue;
         }
-        match send_state(&mut conn, faces_dir, &state).await {
+
+        let now = tokio::time::Instant::now();
+        if state != last_seen {
+          last_seen = state.clone();
+          // Entering or leaving a busy stretch: remember how long it ran, so a
+          // finish can be judged worth celebrating.
+          if is_busy(&state) {
+            busy_since.get_or_insert(now);
+          } else if let Some(started) = busy_since.take() {
+            worked_for = now.duration_since(started);
+          }
+          let resolved = resolve_finish(&state, worked_for, &timings);
+          if resolved != state {
+            debug!("Skipping celebration: only {}s of work", worked_for.as_secs());
+            state = resolved.to_string();
+          }
+          requested = state;
+          requested_since = now;
+        }
+
+        // Re-evaluated every tick, not just on change: escalation and decay
+        // happen with the state file sitting still.
+        let face = present(&requested, now.duration_since(requested_since), &timings).to_string();
+        if displayed.as_deref() == Some(face.as_str()) {
+          continue;
+        }
+        match send_state(&mut conn, faces_dir, &face).await {
           Ok(()) => {
-            info!("Applied state {}", state);
-            let _ = std::fs::write(&applied_file, format!("{}\n", state));
-            applied = Some(state);
+            info!("Applied state {}", face);
+            let _ = std::fs::write(&applied_file, format!("{}\n", face));
+            displayed = Some(face);
           }
           Err(e) => {
             conn.disconnect().await.ok();
-            return Err(format!("Failed to apply state {}: {}", state, e).into());
+            return Err(format!("Failed to apply state {}: {}", face, e).into());
           }
         }
       }
@@ -449,13 +568,24 @@ async fn send_state(
   faces_dir: &Path,
   state: &str
 ) -> Result<(), Box<dyn Error>> {
-  let gif = faces_dir.join(format!("{}.gif", state));
-  let png = faces_dir.join(format!("{}.png", state));
-  let path = if gif.exists() {
-    gif
-  } else if png.exists() {
-    png
-  } else {
+  // Escalated variants are numbered (alerting2, alerting3). If one is missing
+  // -- an older faces directory, say -- fall back to the base face rather than
+  // failing and killing the connection.
+  let base = state.trim_end_matches(|c: char| c.is_ascii_digit());
+  let mut path = None;
+  for name in [state, base] {
+    for ext in ["gif", "png"] {
+      let candidate = faces_dir.join(format!("{}.{}", name, ext));
+      if candidate.exists() {
+        path = Some(candidate);
+        break;
+      }
+    }
+    if path.is_some() {
+      break;
+    }
+  }
+  let Some(path) = path else {
     return Err(
       format!("no face image for state '{}' in {}", state, faces_dir.display()).into()
     );
@@ -603,4 +733,100 @@ pub async fn send_video(
 
   conn.disconnect().await?;
   Ok(())
+}
+
+#[cfg(test)]
+mod status_daemon_tests {
+  #![allow(clippy::unwrap_used)]
+
+  use super::*;
+
+  fn t() -> Timings {
+    Timings::default()
+  }
+
+  #[test]
+  fn states_pass_through_untouched_when_fresh() {
+    for state in ["thinking", "working", "chilling", "compacting", "off"] {
+      assert_eq!(present(state, Duration::ZERO, &t()), state);
+      assert_eq!(present(state, Duration::from_secs(3600), &t()), state);
+    }
+  }
+
+  #[test]
+  fn alert_escalates_on_schedule() {
+    assert_eq!(present("alerting", Duration::ZERO, &t()), "alerting");
+    assert_eq!(present("alerting", Duration::from_secs(59), &t()), "alerting");
+    assert_eq!(present("alerting", Duration::from_secs(60), &t()), "alerting2");
+    assert_eq!(present("alerting", Duration::from_secs(299), &t()), "alerting2");
+    assert_eq!(present("alerting", Duration::from_secs(300), &t()), "alerting3");
+    assert_eq!(present("alerting", Duration::from_secs(86400), &t()), "alerting3");
+  }
+
+  #[test]
+  fn verdicts_decay_to_idle() {
+    for verdict in ["success", "error"] {
+      assert_eq!(present(verdict, Duration::ZERO, &t()), verdict);
+      assert_eq!(present(verdict, Duration::from_secs(5), &t()), verdict);
+      assert_eq!(present(verdict, Duration::from_secs(6), &t()), "chilling");
+    }
+  }
+
+  #[test]
+  fn only_active_states_count_as_busy() {
+    assert!(is_busy("thinking"));
+    assert!(is_busy("working"));
+    assert!(is_busy("compacting"));
+    for idle in ["chilling", "alerting", "success", "error", "off"] {
+      assert!(!is_busy(idle), "{} should not count as busy", idle);
+    }
+  }
+
+  #[test]
+  fn celebration_must_be_earned() {
+    let timings = t();
+    assert_eq!(resolve_finish("success", Duration::from_secs(0), &timings), "chilling");
+    assert_eq!(resolve_finish("success", Duration::from_secs(599), &timings), "chilling");
+    assert_eq!(resolve_finish("success", Duration::from_secs(600), &timings), "success");
+  }
+
+  #[test]
+  fn only_success_is_gated_on_effort() {
+    // An error is worth showing however briefly it took to get there.
+    let timings = t();
+    for state in ["error", "alerting", "chilling", "working"] {
+      assert_eq!(resolve_finish(state, Duration::ZERO, &timings), state);
+    }
+  }
+
+  #[test]
+  fn shortened_timings_escalate_sooner() {
+    // The overrides the hardware test drives escalation with.
+    let fast = Timings {
+      alert_escalate: Duration::from_secs(5),
+      alert_panic: Duration::from_secs(10),
+      transient: Duration::from_secs(2),
+      celebrate_after: Duration::from_secs(3)
+    };
+    assert_eq!(present("alerting", Duration::from_secs(4), &fast), "alerting");
+    assert_eq!(present("alerting", Duration::from_secs(5), &fast), "alerting2");
+    assert_eq!(present("alerting", Duration::from_secs(10), &fast), "alerting3");
+    assert_eq!(present("success", Duration::from_secs(2), &fast), "chilling");
+    assert_eq!(resolve_finish("success", Duration::from_secs(3), &fast), "success");
+  }
+
+  #[test]
+  fn resolution_is_stable_when_it_rewrites_a_state() {
+    // An unearned success resolves to "chilling" while the state file still
+    // says "success". The daemon must therefore track the RAW file value
+    // separately -- comparing the file against the resolved value made this
+    // branch re-enter every tick, which reset the state timer (breaking
+    // escalation and decay) and lost the recorded work duration.
+    let timings = t();
+    let raw = "success";
+    let resolved = resolve_finish(raw, Duration::from_secs(1), &timings);
+    assert_eq!(resolved, "chilling");
+    assert_ne!(resolved, raw, "resolution rewrote the state, so the raw value \
+                               must be what the loop compares against");
+  }
 }

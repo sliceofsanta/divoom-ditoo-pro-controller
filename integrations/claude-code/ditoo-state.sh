@@ -2,7 +2,7 @@
 #
 # Show a Claude Code status face on a Divoom Ditoo Pro.
 #
-#   ditoo-state.sh thinking|working|alerting|success|error|chilling|off
+#   ditoo-state.sh thinking|working|alerting|success|error|compacting|chilling|off
 #   ditoo-state.sh status      # what is going on right now
 #
 # Designed to be called from Claude Code hooks, which means two hard rules:
@@ -255,11 +255,11 @@ case "${1:-}" in
     tail -n 10 "$LOG" 2>/dev/null || printf '(no log yet)\n'
     exit 0
     ;;
-  thinking | working | alerting | success | error | chilling | off)
+  thinking | working | alerting | success | error | compacting | chilling | off)
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s thinking|working|alerting|success|error|chilling|off|start|stop|status\n' "$(basename "$SELF")" >&2
+    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|off|start|stop|status\n' "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac

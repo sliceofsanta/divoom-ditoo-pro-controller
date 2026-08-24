@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Generate the animated 16x16 status faces shown on the Ditoo Pro.
+"""Generate Claude Quest, a tiny 16x16 status arcade game for Ditoo Pro.
 
-The character is Claude's mascot -- the stocky four-legged fellow from the
-marketing site, who is built entirely out of rectangles and therefore takes to
-a 256-LED panel better than almost anything else would. He keeps his own colour
-in all three states; what changes is what he is DOING:
+Every Claude Code state is another scene in the same miniature platformer:
 
-    thinking  following a little orbit of ideas
-    working   hammering on a tiny cyan keyboard
-    alerting  jumping under a pulsing exclamation mark
-    success   doing a confetti stomp
-    error     slumping with X eyes and a glitch spark
-    chilling  nursing a tiny steaming mug
+    thinking    a new mystery block appears; Claude jumps to accept the quest
+    working     Claude hammers through a glowing wall of code
+    alerting    a locked gate waits for the player's key
+    compacting  a pixel crusher packs loose context into one power cube
+    success     the treasure chest opens and showers Claude with coins
+    error       a mischievous bug steals a heart
+    chilling    Claude naps beside the save-point campfire
+
+The mascot becomes a real player sprite instead of occupying the entire panel.
+That leaves enough room for platforms, enemies, machines and oversized props,
+so every loop reads as an action rather than a collection of unrelated pixels.
 
 Stdlib only (see mascot.py for the sprite and gifwriter.py for the encoder), so
 this runs anywhere without pip installs.
@@ -27,19 +29,19 @@ import sys
 import zlib
 
 import mascot
-from mascot import BODY, SIZE, draw
+from mascot import BODY, SIZE, draw_player
 from gifwriter import write_gif
 
-# Near-black backgrounds keep the mascot brighter than its props on the LEDs.
-# The body remains the source #DD775B in every state; meaning comes from pose,
-# not from repainting the character.
-BG_CHILL = (1, 12, 12)
-BG_THINK = (7, 8, 24)
+# One dark arcade world, tinted by the current event. Near-black skies keep the
+# tiny player and props bright on the real LEDs without turning the full panel
+# into a flashlight.
+BG_CHILL = (2, 8, 18)
+BG_THINK = (7, 6, 24)
 BG_WORK = (0, 8, 18)
-BG_ALERT_HOT = (88, 7, 0)
-BG_ALERT_COOL = (28, 0, 1)
-BG_SUCCESS = (0, 18, 12)
-BG_ERROR = (24, 0, 8)
+BG_ALERT_HOT = (62, 5, 4)
+BG_ALERT_COOL = (24, 0, 10)
+BG_SUCCESS = (0, 16, 13)
+BG_ERROR = (26, 0, 9)
 
 INK = (17, 14, 18)
 CODE_DARK = (26, 76, 129)
@@ -50,6 +52,10 @@ CREAM = (255, 230, 178)
 MINT = (72, 224, 158)
 HOT = (255, 70, 72)
 PINK = (255, 98, 150)
+PURPLE = (157, 91, 230)
+GROUND_DARK = (8, 21, 42)
+GROUND = (22, 54, 84)
+GROUND_LIGHT = (43, 104, 134)
 
 
 def pixels(grid, points, colour):
@@ -57,170 +63,354 @@ def pixels(grid, points, colour):
     mascot.px(grid, x, y, colour)
 
 
+def ground(grid, danger=False, offset=0):
+  """A scrolling two-row arcade platform shared by every playable scene."""
+  edge = HOT if danger else GROUND_LIGHT
+  fill = (82, 20, 30) if danger else GROUND
+  dark = (43, 7, 17) if danger else GROUND_DARK
+  mascot.rect(grid, 0, 13, 15, 13, edge)
+  mascot.rect(grid, 0, 14, 15, 15, fill)
+  for x in range(-2 + offset % 4, 18, 4):
+    mascot.rect(grid, x, 14, x + 1, 14, dark)
+    mascot.px(grid, x + 2, 15, dark)
+
+
+def heart(grid, x, y, colour=HOT, broken=False):
+  if broken:
+    pixels(grid, ((x, y), (x + 2, y), (x, y + 1), (x + 2, y + 1)), colour)
+    mascot.px(grid, x - 1, y + 2, colour)
+    mascot.px(grid, x + 3, y + 3, colour)
+    return
+  pixels(grid, (
+    (x, y), (x + 2, y),
+    (x, y + 1), (x + 1, y + 1), (x + 2, y + 1),
+    (x + 1, y + 2),
+  ), colour)
+
+
+def coin(grid, x, y, shine=False):
+  pixels(grid, ((x + 1, y), (x, y + 1), (x + 2, y + 1), (x + 1, y + 2)), AMBER)
+  mascot.px(grid, x + 1, y + 1, CREAM if shine else AMBER)
+
+
+def key(grid, x, y, colour=AMBER):
+  """A five-wide arcade key, intentionally huge enough to read instantly."""
+  pixels(grid, (
+    (x, y), (x + 1, y), (x + 2, y),
+    (x, y + 1), (x + 2, y + 1),
+    (x, y + 2), (x + 1, y + 2), (x + 2, y + 2),
+    (x + 3, y + 1), (x + 4, y + 1), (x + 4, y + 2),
+  ), colour)
+  mascot.px(grid, x + 1, y + 1, BG_ALERT_COOL)
+
+
+def bug(grid, x, y, angry=False, blink=False, colour=PINK):
+  """A cute seven-wide code bug with antennae and very readable eyes."""
+  mascot.rect(grid, x + 1, y + 1, x + 5, y + 4, colour)
+  mascot.rect(grid, x + 2, y, x + 4, y, HOT if angry else colour)
+  pixels(grid, ((x, y), (x + 1, y + 1), (x + 5, y + 1), (x + 6, y)), colour)
+  pixels(grid, ((x, y + 4), (x + 1, y + 5), (x + 5, y + 5), (x + 6, y + 4)), colour)
+  if blink:
+    pixels(grid, ((x + 2, y + 2), (x + 4, y + 2)), INK)
+  else:
+    pixels(grid, ((x + 2, y + 2), (x + 4, y + 2)), CREAM)
+    pixels(grid, ((x + 2, y + 3), (x + 4, y + 3)), INK)
+  if angry:
+    pixels(grid, ((x + 1, y + 2), (x + 5, y + 2)), INK)
+
+
+def gate(grid, glow=False):
+  colour = CREAM if glow else AMBER
+  mascot.rect(grid, 10, 4, 15, 5, colour)
+  mascot.rect(grid, 10, 4, 11, 12, colour)
+  mascot.rect(grid, 14, 4, 15, 12, colour)
+  mascot.rect(grid, 12, 6, 12, 12, colour)
+  mascot.rect(grid, 9, 9, 13, 11, INK)
+  mascot.rect(grid, 10, 9, 12, 10, HOT if glow else mascot.BODY_DARK)
+  mascot.px(grid, 11, 11, HOT if glow else CREAM)
+
+
 def thinking_frames():
-  """Prompt received: Claude watches three ideas orbit and taps his chin."""
-  orbit = ((2, 2), (5, 0), (10, 0), (13, 2), (14, 5), (1, 5))
-  gaze = (-1, -1, 0, 1, 1, 0, -1, 0)
+  """NEW QUEST: Claude jumps up and bonks a giant mystery block."""
+  jumps = (0, 0, 1, 3, 4, 3, 1, 0)
+  xs = (0, 1, 2, 3, 3, 2, 1, 0)
   frames = []
   for i in range(8):
-    grid = draw(
-      BG_THINK, body_y=4, body_h=6, gaze=gaze[i],
-      blink=i == 6, hand_l=1, hand_r=None
+    grid = mascot.blank(BG_THINK)
+    ground(grid, offset=i)
+
+    # The prop takes up almost half the panel: it reads as a Mario-like mystery
+    # block before the eye even finds the tiny player.
+    block = CREAM if i in (4, 5) else AMBER
+    mascot.rect(grid, 10, 4, 15, 9, mascot.BODY_DARK)
+    mascot.rect(grid, 10, 4, 14, 8, block)
+    mascot.rect(grid, 11, 5, 13, 7, AMBER)
+    pixels(grid, ((11, 5), (12, 5), (13, 6), (12, 7), (12, 8)), CREAM)
+    pixels(grid, ((10, 4), (14, 4), (10, 8), (14, 8)), BODY)
+
+    # Bonking the block releases a coin/star burst over its roof.
+    if i >= 4:
+      rise = (0, 1, 2, 1)[i - 4]
+      coin(grid, 11, 1 - rise, shine=i % 2 == 0)
+      pixels(grid, ((8, 2 + i % 2), (15, 1), (9, 0)), CODE_LIGHT)
+
+    draw_player(
+      grid, xs[i], 7, jump=jumps[i], step=1 + i % 2,
+      hand_l=0, hand_r=-1 if i in (3, 4, 5) else 0,
+      gaze=1, expression="happy" if i >= 4 else "open"
     )
-    # A bent arm reaching the face is a stronger silhouette than a side hand.
-    pixels(grid, ((15, 8), (14, 8), (13, 7)), BODY)
-    for offset in (0, 2, 4):
-      point = orbit[(i + offset) % len(orbit)]
-      mascot.px(grid, point[0], point[1], CREAM if offset == 0 else AMBER)
     frames.append(grid)
-  return frames, [170, 170, 170, 240, 170, 170, 120, 240]
+  return frames, [150, 120, 110, 90, 220, 100, 120, 180]
 
 
 def chilling_frames():
-  """Idle: slow breathing, a curious glance, and a tiny steaming mug."""
-  bob =   [0, 0, 1, 1, 0, 0, 0, 0, 0, 0]
-  gaze =  [0, 0, -1, -1, 0, 1, 1, 0, 0, 0]
-  blink = [False, False, False, False, False, False, False, True, False, False]
-  steam = (
-    ((14, 9), (15, 8), (14, 7)),
-    ((15, 9), (14, 8), (14, 7)),
-    ((14, 9), (14, 8), (15, 7)),
-    ((15, 9), (15, 8), (14, 7)),
-  )
+  """SAVE POINT: Claude dozes beside a warm animated campfire."""
+  stars = ((1, 1), (5, 2), (9, 0), (14, 3), (11, 5))
   frames = []
-  for i in range(10):
-    grid = draw(
-      BG_CHILL, body_y=4 + bob[i], body_h=6, gaze=gaze[i], blink=blink[i],
-      hand_l=bob[i], hand_r=None, legs=(0, 0, 0, -2)
+  for i in range(12):
+    grid = mascot.blank(BG_CHILL)
+    ground(grid, offset=0)
+    for number, (x, y) in enumerate(stars):
+      mascot.px(grid, x, y, CREAM if (i + number * 2) % 6 == 0 else CODE_DARK)
+
+    # Crescent moon and a floating Z make this the attract/save screen, not a
+    # generic idle pose.
+    pixels(grid, ((13, 0), (14, 0), (12, 1), (13, 2), (14, 2)), CREAM)
+    if i % 6 < 4:
+      z_y = 4 - i % 4
+      pixels(grid, ((6, z_y), (7, z_y), (7, z_y + 1), (6, z_y + 2), (7, z_y + 2)), CODE_LIGHT)
+
+    # Logs and a two-tone flame alternate independently for organic flicker.
+    pixels(grid, ((9, 12), (10, 11), (11, 12), (12, 11), (13, 12), (14, 12)), mascot.BODY_DARK)
+    flame = (
+      ((11, 11), (12, 10), (12, 9), (13, 11)),
+      ((11, 11), (11, 10), (12, 11), (13, 10), (13, 9)),
+      ((11, 11), (12, 10), (13, 11), (12, 8)),
+    )[i % 3]
+    pixels(grid, flame, HOT)
+    pixels(grid, ((12, 11), (12, 10)), AMBER)
+    if i % 4 == 0:
+      mascot.px(grid, 12, 9, CREAM)
+
+    draw_player(
+      grid, 0, 7, step=0, hand_l=1, hand_r=1,
+      expression="sleep", blink=True
     )
-    # Three-pixel mug with a dark rim and a one-pixel handle. It hides the
-    # fourth foot, as though Claude is hugging it close to the body.
-    mascot.rect(grid, 12, 10 + bob[i], 14, 13 + bob[i], INK)
-    mascot.rect(grid, 13, 11 + bob[i], 14, 12 + bob[i], CREAM)
-    pixels(grid, ((15, 11 + bob[i]), (15, 12 + bob[i])), INK)
-    mascot.px(grid, 12, 11 + bob[i], BODY)
-    pixels(grid, steam[i % len(steam)], CREAM)
     frames.append(grid)
-  return frames, [260] * 10
+  return frames, [240] * 12
 
 
 def working_frames():
-  """Busy: four feet brace while both hands hammer a tiny keyboard."""
-  stride = [(1, -1, 1, -1), (0, 0, 0, 0), (-1, 1, -1, 1), (0, 0, 0, 0)]
-  bob = [0, 0, 1, 0, 0, 1, 0, 0]
-  gaze = [-1, 0, 1, 0, -1, 0, 1, 0]
-  key_patterns = (
-    ((4, 13), (7, 13), (10, 13)),
-    ((5, 13), (8, 13), (11, 13)),
-  )
-  sparks = (
-    ((0, 2), (1, 5), (14, 1)),
-    ((1, 1), (0, 4), (15, 3)),
-    ((0, 3), (1, 6), (14, 2)),
-    ((1, 2), (0, 5), (15, 1)),
-  )
+  """CODE DUNGEON: run, raise hammer, smash wall, shower sparks."""
   frames = []
-  for i in range(8):
-    beat = i % 4
-    grid = draw(
-      BG_WORK, body_y=2 + bob[i], body_h=6, legs=stride[beat],
-      hand_l=None, hand_r=None, gaze=gaze[i]
+  for i in range(10):
+    phase = i % 5
+    grid = mascot.blank(BG_WORK)
+    ground(grid, offset=i)
+
+    # Tiny score/progress pips make the whole composition read as a game HUD.
+    for pip in range(5):
+      colour = CREAM if pip == (i // 2) % 5 else CODE_DARK
+      mascot.rect(grid, 1 + pip * 3, 0, 2 + pip * 3, 0, colour)
+
+    # The code wall is a large cyan dungeon obstacle, with cracks that appear
+    # at impact and glowing fragments that fly into the sky.
+    mascot.rect(grid, 11, 5, 15, 12, CODE_DARK)
+    mascot.rect(grid, 12, 6, 15, 12, CODE)
+    pixels(grid, ((12, 7), (14, 7), (13, 9), (15, 10), (12, 12)), CODE_LIGHT)
+    if phase in (3, 4):
+      pixels(grid, ((12, 6), (13, 7), (12, 8), (14, 9), (13, 10), (14, 11)), INK)
+      pixels(grid, ((10, 4), (9, 6), (14, 3), (15, 1), (10, 9)), CODE_LIGHT)
+
+    draw_player(
+      grid, 1, 7, step=1 + i % 2 if phase == 0 else 0,
+      hand_l=0, hand_r=-2 if phase in (1, 2) else 0,
+      gaze=1, expression="happy" if phase == 4 else "open"
     )
-    # Keyboard stays planted while Claude bobs above it. The hand phase is
-    # intentionally offset from the leg phase so the cycle does not flatten.
-    mascot.rect(grid, 3, 12, 12, 14, CODE_DARK)
-    mascot.rect(grid, 4, 12, 11, 12, CODE)
-    pixels(grid, key_patterns[i % 2], CODE_LIGHT)
-    left_x = 4 + (i % 2)
-    right_x = 10 + ((i + 1) % 2)
-    mascot.rect(grid, left_x, 10 + bob[i], left_x + 1, 11 + bob[i], BODY)
-    mascot.rect(grid, right_x, 10 + bob[i], right_x + 1, 11 + bob[i], BODY)
-    pixels(grid, sparks[beat], CODE if i % 2 else CODE_LIGHT)
+
+    # A four-beat hammer arc: overhead, diagonal, impact, recoil.
+    if phase == 1:
+      pixels(grid, ((8, 8), (9, 7), (10, 6), (11, 5)), AMBER)
+      mascot.rect(grid, 10, 3, 13, 5, CREAM)
+    elif phase == 2:
+      pixels(grid, ((8, 9), (9, 8), (10, 7), (11, 7)), AMBER)
+      mascot.rect(grid, 12, 6, 14, 8, CREAM)
+    elif phase == 3:
+      mascot.rect(grid, 8, 10, 12, 10, AMBER)
+      mascot.rect(grid, 13, 9, 15, 11, CREAM)
+    elif phase == 4:
+      pixels(grid, ((8, 9), (9, 8), (10, 7)), AMBER)
+      mascot.rect(grid, 10, 5, 13, 7, CREAM)
     frames.append(grid)
-  return frames, [105] * 8
+  return frames, [105, 130, 95, 170, 110] * 2
 
 
 def alerting_frames():
-  """Blocked on you: a weighted hop under a pulsing exclamation mark.
-
-  Crouch, launch, hang, fall, land heavy, recover -- the squash at each end is
-  what gives the hop any weight at all in six frames.
-  """
-  # body_y, squash, legs lifted, left hand, right hand, background hot
-  poses = [
-    (5, 1, (0, 0, 0, 0),         1,  1, False),   # crouch
-    (4, 0, (-1, -1, -1, -1),    -2, -1, True),    # launch
-    (3, 0, (-1, -1, -1, -1),    -3, -2, True),    # hang
-    (4, 0, (-1, -1, -1, -1),    -1, -3, True),    # fall, other hand waves
-    (5, 1, (0, 0, 0, 0),         2,  1, False),   # heavy landing
-    (4, 0, (0, 0, 0, 0),         0,  0, False),   # recover
-  ]
+  """PLAYER NEEDED: Claude waves at a locked gate while its key pulses."""
+  bobs = (0, 0, 1, 1, 0, 0, 1, 0)
   frames = []
-  for i, (body_y, squash, legs, hand_l, hand_r, hot) in enumerate(poses):
-    grid = draw(
-      BG_ALERT_HOT if hot else BG_ALERT_COOL,
-      body_y=body_y, body_h=6, squash=squash, legs=legs,
-      hand_l=hand_l, hand_r=hand_r, gaze=0
+  for i in range(8):
+    hot = i in (2, 3, 6)
+    grid = mascot.blank(BG_ALERT_HOT if hot else BG_ALERT_COOL)
+    ground(grid, danger=False)
+    gate(grid, glow=hot)
+    key(grid, 5, 1 + bobs[i], CREAM if hot else AMBER)
+    pixels(grid, ((4, 1), (4, 4), (9, 0), (9, 4)), HOT if hot else PINK)
+    draw_player(
+      grid, 0, 7, hand_l=1, hand_r=-2 if i % 2 else -1,
+      gaze=1, expression="shock" if hot else "open"
     )
-    marker = CREAM if i in (1, 2, 3) else AMBER
-    mascot.rect(grid, 7, 0, 8, 1, marker)
-    mascot.rect(grid, 7, 3, 8, 3, marker)
     frames.append(grid)
-  return frames, [140, 90, 190, 100, 160, 180]
+  return frames, [160, 160, 100, 210, 160, 160, 100, 220]
 
 
 def success_frames():
-  """Finished: the original mascot's stomp translated into confetti pixels."""
-  poses = (
-    (5, 1, (0, 0, 0, 0),  1,  1, "open"),
-    (4, 0, (-1, 0, 0, -1), -2, -2, "happy"),
-    (3, 0, (-1, -1, -1, -1), -3, -3, "happy"),
-    (4, 0, (1, -1, 0, -1), -1, -2, "happy"),
-    (5, 1, (0, 0, 0, 0),  2,  1, "open"),
-    (4, 0, (-1, 0, -1, 0), -2, -2, "happy"),
-    (3, 0, (-1, -1, -1, -1), -3, -3, "happy"),
-    (4, 0, (-1, 1, -1, 0), -2, -1, "happy"),
-  )
-  colours = (MINT, AMBER, CODE, CREAM)
-  seeds = ((0, 1), (3, 0), (6, 2), (9, 0), (12, 1), (15, 3))
+  """LEVEL CLEAR: a treasure chest opens and Claude jumps through coins."""
+  jumps = (0, 0, 1, 3, 4, 3, 1, 0, 0, 0)
+  coin_seeds = ((7, 4), (10, 2), (13, 4), (6, 7), (12, 7))
   frames = []
-  for i, (body_y, squash, legs, hand_l, hand_r, expression) in enumerate(poses):
-    grid = draw(
-      BG_SUCCESS, body_y=body_y, body_h=6, squash=squash, legs=legs,
-      hand_l=hand_l, hand_r=hand_r, expression=expression
+  for i in range(10):
+    grid = mascot.blank(BG_SUCCESS)
+    ground(grid, offset=0)
+
+    # Chest body stays planted while the lid snaps open on a held anticipation
+    # frame, a classic arcade reward beat.
+    mascot.rect(grid, 9, 9, 15, 12, mascot.BODY_DARK)
+    mascot.rect(grid, 10, 10, 14, 11, AMBER)
+    mascot.rect(grid, 12, 10, 13, 11, CREAM)
+    if i < 2:
+      mascot.rect(grid, 9, 7, 15, 9, AMBER)
+      mascot.rect(grid, 10, 7, 14, 7, CREAM)
+    else:
+      mascot.rect(grid, 10, 5, 15, 6, AMBER)
+      mascot.rect(grid, 11, 5, 14, 5, CREAM)
+      mascot.rect(grid, 9, 8, 15, 9, INK)
+
+    if i >= 2:
+      for number, (x, y) in enumerate(coin_seeds):
+        rise = (i - 2 + number) % 5
+        coin(grid, x, max(0, y - rise), shine=(i + number) % 2 == 0)
+      pixels(grid, ((8, 1 + i % 2), (15, 1), (6, 3), (14, 7)), MINT)
+
+    draw_player(
+      grid, 0, 7, jump=jumps[i], step=0,
+      hand_l=-2 if i >= 2 else 0, hand_r=-2 if i >= 2 else 0,
+      gaze=1, expression="happy" if i >= 2 else "open"
     )
-    for j, (x, y) in enumerate(seeds):
-      fall = (y + i // 2 + (j % 2)) % 5
-      mascot.px(grid, x, fall, colours[(i + j) % len(colours)])
-    # Impact sparks alternate between the left and right stomp.
-    impact_x = (2, 3, 4) if i < 4 else (11, 12, 13)
-    if i in (0, 4):
-      pixels(grid, ((impact_x[0], 14), (impact_x[1], 15), (impact_x[2], 14)), AMBER)
     frames.append(grid)
-  return frames, [130, 95, 170, 105, 140, 95, 170, 150]
+  return frames, [180, 260, 100, 90, 190, 100, 120, 170, 180, 220]
 
 
 def error_frames():
-  """Failed: Claude slumps, flashes X eyes, and sheds a tiny glitch spark."""
-  bob = (0, 0, 1, 1, 0, 0)
-  glitches = (
-    ((14, 1), (13, 2), (15, 3)),
-    ((13, 0), (14, 1), (13, 3)),
-    ((15, 1), (14, 2), (15, 4)),
-  )
+  """OUCH: a mischievous code bug bonks Claude and breaks a heart."""
+  bug_x = (10, 9, 8, 8, 9, 10, 10, 10)
+  recoil = (0, 0, 1, 2, 1, 0, 0, 0)
+  frames = []
+  for i in range(8):
+    grid = mascot.blank(BG_ERROR if i not in (2, 3) else BG_ALERT_HOT)
+    ground(grid, danger=True, offset=i)
+    bug(grid, bug_x[i], 7, angry=i < 5, blink=i == 6)
+    if i < 2:
+      heart(grid, 4, 1, HOT)
+    else:
+      heart(grid, 4, 0, HOT, broken=True)
+      pixels(grid, ((7, 6), (8, 5), (8, 7), (9, 6)), CREAM if i % 2 else AMBER)
+    draw_player(
+      grid, max(-1, 1 - recoil[i]), 7, jump=recoil[i],
+      hand_l=1 if i >= 2 else 0, hand_r=1 if i >= 2 else 0,
+      gaze=1, expression="x" if 2 <= i <= 5 else ("shock" if i == 1 else "open")
+    )
+    frames.append(grid)
+  return frames, [170, 110, 90, 210, 120, 180, 200, 220]
+
+
+def alerting2_frames():
+  """PLAYER NEEDED, NOW: the same gate, but lava rises and Claude panic-hops."""
+  jumps = (0, 2, 3, 1, 0, 3, 2, 0)
+  frames = []
+  for i in range(8):
+    hot = i % 2 == 0
+    grid = mascot.blank(BG_ALERT_HOT if hot else BG_ALERT_COOL)
+    ground(grid, danger=True, offset=i * 2)
+    gate(grid, glow=True)
+    key(grid, 5, i % 2, CREAM if hot else HOT)
+    pixels(grid, ((0, 1), (3, 0), (8, 4), (15, 1), (8, 7)), CREAM if hot else HOT)
+    draw_player(
+      grid, 0, 7, jump=jumps[i], step=0,
+      hand_l=-2, hand_r=-2, gaze=1, expression="shock"
+    )
+    frames.append(grid)
+  return frames, [95, 85, 110, 85, 95, 110, 85, 120]
+
+
+def alerting3_frames():
+  """BOSS ALERT: a giant bug guards the key while the whole level strobes."""
   frames = []
   for i in range(6):
-    grid = draw(
-      BG_ERROR, body_y=4 + bob[i], body_h=6, squash=1 if i in (2, 3) else 0,
-      legs=(0, -1, 0, -1), hand_l=2, hand_r=1,
-      expression="x"
+    hot = i % 2 == 0
+    grid = mascot.blank(HOT if hot else BG_ALERT_COOL)
+    ground(grid, danger=True, offset=i)
+
+    # The escalated alert swaps the door for its boss: one giant face, fangs,
+    # claws and the stolen key. It is loud, but still mischievous rather than
+    # grim, which keeps the desk companion cute.
+    boss = CREAM if hot else PINK
+    mascot.rect(grid, 8, 1, 15, 8, boss)
+    mascot.rect(grid, 9, 0, 14, 0, boss)
+    pixels(grid, ((7, 0), (8, 1), (15, 1), (7, 4), (15, 5)), boss)
+    mascot.rect(grid, 9, 3, 14, 6, CREAM if not hot else AMBER)
+    mascot.rect(grid, 9, 3, 10, 4, INK)
+    mascot.rect(grid, 13, 3, 14, 4, INK)
+    pixels(grid, ((10, 7), (11, 8), (13, 8), (14, 7)), INK)
+    key(grid, 10, 9, INK if hot else CREAM)
+
+    draw_player(
+      grid, 0, 7, jump=1 if i in (1, 4) else 0,
+      hand_l=-2, hand_r=-2, gaze=1,
+      expression="shock", body=CREAM if hot else BODY,
+      light=CREAM, dark=AMBER if hot else mascot.BODY_DARK
     )
-    pixels(grid, glitches[i % len(glitches)], HOT if i % 2 == 0 else PINK)
-    # A one-row colour tear gives the rigid rectangle a convincing glitch.
-    tear_y = 8 + (i % 2)
-    mascot.rect(grid, 3 + (i % 2), tear_y, 5 + (i % 2), tear_y, HOT)
     frames.append(grid)
-  return frames, [180, 120, 220, 120, 180, 260]
+  return frames, [90, 90, 90, 90, 90, 120]
+
+
+def compacting_frames():
+  """POWER CUBE: Claude pulls a lever while a crusher packs loose pixels."""
+  frames = []
+  drops = (0, 1, 3, 5, 6, 5, 3, 1)
+  for i, drop in enumerate(drops):
+    grid = mascot.blank(BG_THINK)
+    ground(grid, offset=0)
+
+    # Crusher chamber, loose code blocks, then a bright single power cube at
+    # maximum compression.
+    mascot.rect(grid, 9, 3, 9, 12, GROUND_LIGHT)
+    mascot.rect(grid, 15, 3, 15, 12, GROUND_LIGHT)
+    mascot.rect(grid, 9, 11, 15, 12, GROUND)
+    if drop < 5:
+      mascot.rect(grid, 10, 7, 11, 8, CODE)
+      mascot.rect(grid, 13, 6, 14, 7, CODE_LIGHT)
+      mascot.rect(grid, 12, 9, 13, 10, CODE_DARK)
+    else:
+      mascot.rect(grid, 11, 9, 14, 11, CODE)
+      mascot.rect(grid, 12, 9, 13, 10, CREAM if i == 4 else CODE_LIGHT)
+      pixels(grid, ((10, 8), (15, 8), (10, 10)), MINT)
+
+    head_y = 2 + drop
+    mascot.rect(grid, 11, 0, 13, max(0, head_y - 1), GROUND)
+    mascot.rect(grid, 10, head_y, 14, min(10, head_y + 1), CREAM if i == 4 else AMBER)
+
+    # Lever and knob visibly connect Claude's hand to the machine.
+    mascot.rect(grid, 8, 9, 8, 12, AMBER)
+    knob_y = 8 + (1 if i in (3, 4, 5) else 0)
+    mascot.rect(grid, 7, knob_y, 8, knob_y + 1, HOT)
+    draw_player(
+      grid, 0, 7, step=1 + i % 2,
+      hand_l=0, hand_r=-1 if i in (2, 3, 4, 5) else 0,
+      gaze=1, expression="happy" if i == 4 else "open"
+    )
+    frames.append(grid)
+  return frames, [150, 130, 110, 100, 260, 100, 120, 160]
 
 
 def off_frames():
@@ -229,12 +419,15 @@ def off_frames():
 
 
 FACES = {
-  "thinking": (thinking_frames, "prompt received -- orbiting ideas"),
-  "working": (working_frames, "busy -- hammering a tiny keyboard"),
-  "alerting": (alerting_frames, "blocked on you -- jumping under an exclamation"),
-  "success": (success_frames, "finished -- confetti stomp"),
-  "error": (error_frames, "failed -- X eyes and a glitch spark"),
-  "chilling": (chilling_frames, "idle -- breathing with a steaming mug"),
+  "thinking": (thinking_frames, "NEW QUEST -- bonking a mystery block"),
+  "working": (working_frames, "CODE DUNGEON -- hammering a glowing wall"),
+  "alerting": (alerting_frames, "PLAYER NEEDED -- waiting at a locked gate"),
+  "alerting2": (alerting2_frames, "PLAYER NEEDED -- lava rises at the gate"),
+  "alerting3": (alerting3_frames, "BOSS ALERT -- giant bug stole the key"),
+  "compacting": (compacting_frames, "POWER CUBE -- crushing loose pixels"),
+  "success": (success_frames, "LEVEL CLEAR -- treasure and coin shower"),
+  "error": (error_frames, "OUCH -- code bug broke a heart"),
+  "chilling": (chilling_frames, "SAVE POINT -- napping by the campfire"),
   "off": (off_frames, "blank display"),
 }
 
@@ -290,6 +483,7 @@ def write_png(path, frame):
 
 CHARS = {
   mascot.BODY: "#", mascot.BODY_DARK: "+", mascot.BODY_LIGHT: "*",
+  mascot.FACE: "f", mascot.FACE_LIGHT: "F",
   mascot.EYE: "o", mascot.EYE_SHINE: "@",
   CODE_DARK: "=", CODE: "%", CODE_LIGHT: "%", AMBER: "!", CREAM: "!",
   MINT: "!", HOT: "!", PINK: "!", INK: "+",

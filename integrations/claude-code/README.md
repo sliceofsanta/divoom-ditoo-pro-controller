@@ -1,28 +1,30 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into a physical progress screen for
-[Claude Code](https://claude.com/claude-code): the 16x16 display shows whether
-Claude is thinking, working, waiting on you, done, failed, or idle.
-
-The character is **Claude's mascot** -- the stocky four-legged fellow from the
-marketing site. He keeps his own colour throughout; what changes is what he is
-doing.
+Turn a Divoom Ditoo Pro into **Claude Quest**, a physical progress screen for
+[Claude Code](https://claude.com/claude-code). Instead of a row of abstract
+status portraits, the 16x16 display becomes one continuous tiny arcade world:
+Claude is the player, work is a level, permissions are locked gates, bugs are
+literal bugs, and a finished turn earns the treasure chest.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | follows three orbiting ideas and taps his chin |
-| `working` | Claude runs a tool | hammers on a tiny cyan keyboard, code sparks flying |
-| `alerting` | Claude needs your input | weighted hop under a pulsing exclamation mark |
-| `success` | Claude finished responding | the confetti stomp from the original mascot clips |
-| `error` | a tool or the turn failed | slumps with X eyes and a red glitch spark |
-| `chilling` | a session starts, or manual | slow breathing with a tiny steaming mug |
+| `thinking` | you submit a prompt | **NEW QUEST:** jumps up and bonks a giant mystery block |
+| `working` | Claude runs a tool | **CODE DUNGEON:** hammers through a glowing code wall |
+| `compacting` | Claude compacts context | **POWER CUBE:** pulls the lever on a pixel crusher |
+| `alerting` | Claude needs your input | **PLAYER NEEDED:** waits at a locked gate for the key |
+| `alerting2` | still waiting after 1 minute | the same gate flashes faster and lava rises |
+| `alerting3` | still waiting after 5 minutes | **BOSS ALERT:** a giant code bug steals the key |
+| `success` | Claude finished responding | **LEVEL CLEAR:** chest opens, coins fly, Claude victory-jumps |
+| `error` | a tool or the turn failed | **OUCH:** a mischievous code bug bonks Claude and breaks a heart |
+| `chilling` | a session starts, or manual | **SAVE POINT:** naps beside a flickering campfire under the moon |
 | `off` | the session ends, or manual | blank display |
 
 The mascot is built entirely from `<rect>` elements -- no paths, no curves --
-which is the happy reason he survives being squeezed onto 256 LEDs. The body
-keeps the source `#DD775B`, four-leg proportions, and block construction in
-every state. Each state gets one strong prop and a different action silhouette
-instead of recolouring the mascot.
+which is the happy reason he survives being squeezed onto 256 LEDs. The arcade
+player keeps the source `#DD775B`, cream face, bright top plane, dark side plane
+and four feet, but shrinks to seven columns so most of the screen can tell the
+story. Every prop is deliberately huge: mystery block, hammer, gate, key,
+crusher, chest, bug and campfire all read from across a room.
 
 The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
@@ -156,21 +158,52 @@ All optional, set as environment variables:
 | `DITOO_OFF_CLOCK_ID` | unset | make `off` restore this clock face instead of blanking |
 | `DITOO_RUST_LOG` | `warn` | controller log level; set `debug` to diagnose device problems |
 | `DITOO_LOG_MAX_LINES` | `500` | log is trimmed to 200 lines once it exceeds this |
+| `DITOO_ALERT_ESCALATE_SECS` | `60` | how long a blocked alert runs before it escalates |
+| `DITOO_ALERT_PANIC_SECS` | `300` | how long before it escalates again, to the strobe |
+| `DITOO_TRANSIENT_SECS` | `6` | how long `success` and `error` show before decaying to idle |
+| `DITOO_CELEBRATE_AFTER_SECS` | `600` | how much work a finish needs before it earns the celebration |
+
+The four timings above are read by the daemon at startup, so change them and
+restart it. Short values are also the practical way to watch the escalation
+path without waiting five real minutes:
+
+```bash
+DITOO_ALERT_ESCALATE_SECS=5 DITOO_ALERT_PANIC_SECS=10 ./integrations/claude-code/ditoo-state.sh start
+```
+
+## How states are presented over time
+
+The hooks report what happened; the daemon decides how to show it. Three rules
+do the work, and they are why the display is worth glancing at rather than just
+being decorative:
+
+- **Alerts escalate.** `alerting` gets more insistent the longer you leave it --
+  after a minute, then again after five. Quiet enough to ignore briefly,
+  impossible to ignore eventually.
+- **Verdicts decay.** `success` and `error` are events, not conditions. They
+  play, then the display returns to idle rather than sitting on a stale verdict.
+- **Celebrations are earned.** A turn that finishes in seconds goes quietly
+  idle; only a long stretch of work gets the celebration. Otherwise it stops
+  meaning anything.
+
+Escalation and decay happen with the state file sitting completely still, so
+the daemon re-evaluates every tick rather than only when a hook fires.
 | `DITOO_START_STATE` | `chilling` | state the daemon shows on startup |
 
 ## Custom faces
 
 Drop your own 16x16 animated GIF into `faces/` named after the state
-(`thinking.gif`, `working.gif`, `alerting.gif`, `success.gif`, `error.gif`, or
-`chilling.gif`). A same-named `.png` is used as a single-frame fallback if no
-GIF exists.
+(`thinking.gif`, `working.gif`, `compacting.gif`, `alerting.gif`, `success.gif`,
+`error.gif`, or `chilling.gif`). A same-named `.png` is used as a single-frame
+fallback if no GIF exists. `alerting2` and `alerting3` are the automatic
+one-minute and five-minute escalations used by the daemon.
 
-To edit the bundled ones, change the frame definitions in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The sprite
-lives in [`faces/mascot.py`](faces/mascot.py), posed by a handful of numbers --
-`body_y` hops him, `squash` flattens him on landing, `legs` sets each of the
-four independently, `hand_l`/`hand_r` swing the hands, `gaze` and `blink` do
-the eyes:
+To edit the bundled ones, change the level scenes in
+[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The player
+sprite lives in [`faces/mascot.py`](faces/mascot.py), posed by a handful of
+numbers: `x` and `y` place him in the level, `jump` lifts him, `step` selects a
+running-foot pair, `hand_l`/`hand_r` swing the hands, and `gaze`, `blink` and
+`expression` do the face:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -181,15 +214,15 @@ and, with `--preview`, writes 320x320 `*_preview.gif` and `*_preview.png` files
 you can inspect without squinting.
 
 Two things worth knowing before you retime anything. Lock two motions to the
-same period and the loop flattens into a single repeat, so the working hands,
-legs, gaze, and sparks run on deliberately different beats. And the asymmetric
-timing plus squash at each end of a jump is what gives it weight: without the
-short launch and held apex, he simply teleports up and back.
+same period and the loop flattens into a single repeat, so fire, stars, feet,
+props and sparks deliberately run on different beats. And every jump uses a
+short launch plus a held apex; evenly spaced positions look like teleportation
+at this scale.
 
-Proportions in `mascot.py` come from the source SVG -- four legs 11 units wide
-at x = 11, 32, 64 and 85, which scale to columns 2-3, 5-6, 9-10 and 12-13. The
-hands are deliberately a single pixel hard against each edge: two pixels wide
-and they touch the body, and all three merge into one bar.
+The file still includes the larger portrait rig, whose proportions come from
+the source SVG. The arcade scenes use `draw_player`, a purpose-built miniature
+that preserves Claude's four-foot silhouette while leaving roughly half of the
+matrix free for the current level event.
 
 The pose timing follows the weighted movement described in Codrops'
 [frame-by-frame mascot study](https://tympanus.net/codrops/2026/05/05/reverse-engineering-claude-ais-mascot-animations-with-svg-and-gsap/):
