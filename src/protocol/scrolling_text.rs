@@ -280,6 +280,8 @@ pub fn build_scrolling_text_frames(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     // Minimal BDF font: 4-wide, 6-tall glyph for 'A' in a font with ascent=6, descent=2 (height=8).

@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 #[cfg(feature = "text")]
 use std::path::PathBuf;
-use bluer::Address;
 use chrono::NaiveDateTime;
 use clap::{Parser, Subcommand};
 use env_logger::{Builder, Env};
@@ -11,6 +10,7 @@ use log::{debug, info};
 
 use divoom_ditoo_pro_controller::divoom_file_format::animation::Animation;
 use divoom_ditoo_pro_controller::divoom_file_format::frame::bits_per_pixel;
+use divoom_ditoo_pro_controller::Address;
 use divoom_ditoo_pro_controller::{
   find_paired_ditoo_pro_devices, scan_devices, list_paired_devices, send_alarm,
   send_divoom_animation, send_get_clock_face, send_get_volume, send_image,
@@ -319,8 +319,22 @@ async fn resolve_device(device: Option<String>) -> Result<Address, Box<dyn Error
   }
 }
 
+#[cfg(not(target_os = "macos"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+  run().await
+}
+
+// IOBluetooth RFCOMM only works from the process main thread, so on macOS the
+// main thread serves Bluetooth and the async CLI body runs on a second thread.
+#[cfg(target_os = "macos")]
+fn main() -> Result<(), Box<dyn Error>> {
+  divoom_ditoo_pro_controller::macos_bluetooth_host(|| async {
+    run().await.map_err(|e| e.to_string())
+  })
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
   Builder::from_env(Env::default().default_filter_or("debug")).init();
 
   let args = Args::parse();
