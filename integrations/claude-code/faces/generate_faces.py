@@ -3,7 +3,7 @@
 
 Every Claude Code state is another scene in the same miniature platformer:
 
-    thinking    a new mystery block appears; Claude jumps to accept the quest
+    thinking    Claude quietly studies a quest map and considers two routes
     working     Claude hammers through a glowing wall of code
     alerting    a locked gate waits for the player's key
     compacting  a pixel crusher packs loose context into one power cube
@@ -131,36 +131,41 @@ def gate(grid, glow=False):
 
 
 def thinking_frames():
-  """NEW QUEST: Claude jumps up and bonks a giant mystery block."""
-  jumps = (0, 0, 1, 3, 4, 3, 1, 0)
-  xs = (0, 1, 2, 3, 3, 2, 1, 0)
+  """QUEST LOG: Claude stays put, reads a map and weighs two routes."""
+  gazes = (1, 1, 0, 1, 1, 1, 0, 1, 1, 1)
   frames = []
-  for i in range(8):
+  for i in range(10):
     grid = mascot.blank(BG_THINK)
-    ground(grid, offset=i)
+    ground(grid, offset=0)
 
-    # The prop takes up almost half the panel: it reads as a Mario-like mystery
-    # block before the eye even finds the tiny player.
-    block = CREAM if i in (4, 5) else AMBER
-    mascot.rect(grid, 10, 4, 15, 9, mascot.BODY_DARK)
-    mascot.rect(grid, 10, 4, 14, 8, block)
-    mascot.rect(grid, 11, 5, 13, 7, AMBER)
-    pixels(grid, ((11, 5), (12, 5), (13, 6), (12, 7), (12, 8)), CREAM)
-    pixels(grid, ((10, 4), (14, 4), (10, 8), (14, 8)), BODY)
+    # A huge parchment quest map gives "reading" a clear physical prop. The
+    # cyan trail forks at the top; Claude's eyes and the two destinations pulse
+    # slowly as he considers them, but his feet never move.
+    mascot.rect(grid, 9, 3, 15, 11, mascot.BODY_DARK)
+    mascot.rect(grid, 8, 3, 14, 10, CREAM)
+    mascot.rect(grid, 9, 3, 15, 4, AMBER)
+    mascot.rect(grid, 8, 9, 14, 10, AMBER)
+    pixels(grid, ((9, 8), (10, 8), (10, 7), (11, 7), (11, 6), (12, 6)), CODE)
+    pixels(grid, ((13, 5), (13, 7)), CODE_DARK)
+    if i % 4 < 2:
+      pixels(grid, ((13, 5), (14, 4), (14, 5)), MINT)
+      mascot.px(grid, 13, 7, CODE_DARK)
+    else:
+      pixels(grid, ((13, 7), (14, 7), (14, 8)), PINK)
+      mascot.px(grid, 13, 5, CODE_DARK)
 
-    # Bonking the block releases a coin/star burst over its roof.
-    if i >= 4:
-      rise = (0, 1, 2, 1)[i - 4]
-      coin(grid, 11, 1 - rise, shine=i % 2 == 0)
-      pixels(grid, ((8, 2 + i % 2), (15, 1), (9, 0)), CODE_LIGHT)
+    # Thought bubbles rise from the mascot toward a tiny question glyph.
+    mascot.px(grid, 6, 5, CODE_DARK)
+    mascot.px(grid, 7, 3 + i % 2, CODE)
+    pixels(grid, ((7, 0), (8, 0), (9, 1), (8, 2), (8, 3)), CODE_LIGHT)
 
     draw_player(
-      grid, xs[i], 7, jump=jumps[i], step=1 + i % 2,
-      hand_l=0, hand_r=-1 if i in (3, 4, 5) else 0,
-      gaze=1, expression="happy" if i >= 4 else "open"
+      grid, 0, 7, jump=0, step=0,
+      hand_l=1, hand_r=-1,
+      gaze=gazes[i], blink=i == 6, expression="open"
     )
     frames.append(grid)
-  return frames, [150, 120, 110, 90, 220, 100, 120, 180]
+  return frames, [220, 220, 220, 260, 220, 220, 110, 260, 220, 280]
 
 
 def chilling_frames():
@@ -419,7 +424,7 @@ def off_frames():
 
 
 FACES = {
-  "thinking": (thinking_frames, "NEW QUEST -- bonking a mystery block"),
+  "thinking": (thinking_frames, "QUEST LOG -- reading a map, considering two routes"),
   "working": (working_frames, "CODE DUNGEON -- hammering a glowing wall"),
   "alerting": (alerting_frames, "PLAYER NEEDED -- waiting at a locked gate"),
   "alerting2": (alerting2_frames, "PLAYER NEEDED -- lava rises at the gate"),

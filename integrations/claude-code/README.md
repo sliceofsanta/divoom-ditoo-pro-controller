@@ -3,12 +3,13 @@
 Turn a Divoom Ditoo Pro into **Claude Quest**, a physical progress screen for
 [Claude Code](https://claude.com/claude-code). Instead of a row of abstract
 status portraits, the 16x16 display becomes one continuous tiny arcade world:
-Claude is the player, work is a level, permissions are locked gates, bugs are
-literal bugs, and a finished turn earns the treasure chest.
+Claude is the player, thinking is a quest map, work is a level, permissions are
+locked gates, bugs are literal bugs, and a finished turn earns the treasure
+chest.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | **NEW QUEST:** jumps up and bonks a giant mystery block |
+| `thinking` | you submit a prompt | **QUEST LOG:** stays put, reads a map and considers two routes |
 | `working` | Claude runs a tool | **CODE DUNGEON:** hammers through a glowing code wall |
 | `compacting` | Claude compacts context | **POWER CUBE:** pulls the lever on a pixel crusher |
 | `alerting` | Claude needs your input | **PLAYER NEEDED:** waits at a locked gate for the key |
@@ -23,7 +24,7 @@ The mascot is built entirely from `<rect>` elements -- no paths, no curves --
 which is the happy reason he survives being squeezed onto 256 LEDs. The arcade
 player keeps the source `#DD775B`, cream face, bright top plane, dark side plane
 and four feet, but shrinks to seven columns so most of the screen can tell the
-story. Every prop is deliberately huge: mystery block, hammer, gate, key,
+story. Every prop is deliberately huge: quest map, hammer, gate, key,
 crusher, chest, bug and campfire all read from across a room.
 
 The point is still the `alerting` state: you can look away from the terminal and

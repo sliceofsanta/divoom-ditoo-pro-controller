@@ -414,6 +414,10 @@ impl Timings {
   }
 }
 
+/// How many times the daemon will rebuild a dropped connection before giving
+/// up and letting the caller fall back to one-shot sends.
+const MAX_DAEMON_RECONNECTS: u32 = 5;
+
 /// States that mean "Claude is doing something", for the purpose of deciding
 /// whether a finish was worth celebrating.
 fn is_busy(state: &str) -> bool {
@@ -483,6 +487,10 @@ pub async fn run_status_daemon(
   let mut busy_since: Option<tokio::time::Instant> = None;
   let mut worked_for = Duration::ZERO;
   let timings = Timings::from_env();
+  // A held connection can be torn down underneath us -- macOS re-attaching the
+  // audio profile shows up as kIOReturnNotOpen on the next write. Reconnecting
+  // costs one chime; dying costs the whole feature until someone notices.
+  let mut consecutive_failures = 0u32;
   debug!("Status daemon timings: {:?}", timings);
   let mut poll = tokio::time::interval(Duration::from_millis(250));
 
@@ -539,12 +547,29 @@ pub async fn run_status_daemon(
         match send_state(&mut conn, faces_dir, &face).await {
           Ok(()) => {
             info!("Applied state {}", face);
+            consecutive_failures = 0;
             let _ = std::fs::write(&applied_file, format!("{}\n", face));
             displayed = Some(face);
           }
           Err(e) => {
+            consecutive_failures += 1;
+            if consecutive_failures > MAX_DAEMON_RECONNECTS {
+              conn.disconnect().await.ok();
+              return Err(format!(
+                "Failed to apply state {} after {} reconnects: {}",
+                face, MAX_DAEMON_RECONNECTS, e
+              ).into());
+            }
+            info!(
+              "Send failed ({}); reconnecting (attempt {}/{})",
+              e, consecutive_failures, MAX_DAEMON_RECONNECTS
+            );
             conn.disconnect().await.ok();
-            return Err(format!("Failed to apply state {}: {}", face, e).into());
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            conn = DeviceConnection::connect(mac_address).await?;
+            // The panel may be showing anything now, so forget what we thought
+            // was on it and let the next tick re-send.
+            displayed = None;
           }
         }
       }
