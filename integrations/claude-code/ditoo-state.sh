@@ -106,6 +106,29 @@ session_id() {
   esac
 }
 
+# Classify a Notification into the kind of interruption it actually is, so the
+# panel can say whether this needs a keystroke or twenty minutes of reading.
+#
+# Claude Code puts the notification text on stdin alongside the session id.
+# Matching is on the message because there is no field that states the kind --
+# so it is deliberately conservative: anything unrecognised falls back to the
+# plain alert rather than guessing wrong and teaching you to distrust it.
+classify_alert() {
+  local message="$1"
+  local lowered
+  lowered="$(printf '%s' "$message" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in
+    *permission*|*approve*|*allow*|*"needs your"*e*mission*)
+      printf 'alert-permission' ;;
+    *plan*|*review*|*"exit plan"*)
+      printf 'alert-plan' ;;
+    *question*|*"waiting for your"*|*asked*|*clarif*)
+      printf 'alert-question' ;;
+    *)
+      printf 'alerting' ;;
+  esac
+}
+
 # True when a daemon holds the connection. A pid file whose process is gone is
 # stale (killed daemon, reboot) and is cleared so we fall back to one-shot
 # sends rather than silently doing nothing.
@@ -326,11 +349,46 @@ case "${1:-}" in
     tail -n 10 "$LOG" 2>/dev/null || printf '(no log yet)\n'
     exit 0
     ;;
-  thinking | working | alerting | success | error | compacting | chilling | custom | off)
+  alert)
+    # Reads the whole hook payload once: the session id AND the message have to
+    # come from the same stdin, which can only be consumed one time.
+    payload="$(head -c 8192 2>/dev/null)"
+    id="$(printf '%s' "$payload" \
+      | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+      | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    case "$id" in
+      "" | *[!a-zA-Z0-9_-]* ) id=manual ;;
+    esac
+    message="$(printf '%s' "$payload" \
+      | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' \
+      | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    STATE="$(classify_alert "$message")"
+    log "alert: $STATE (from: ${message:-no message})"
+    mkdir -p "$SESSIONS" 2>/dev/null
+    printf '%s\n' "$STATE" > "$SESSIONS/$id"
+    printf '%s\n' "$STATE" > "$DESIRED"
+    if ! daemon_running && mkdir "$LOCK" 2>/dev/null; then
+      nohup "$SELF" --worker >/dev/null 2>&1 &
+    fi
+    exit 0
+    ;;
+  number)
+    # Show a number on the panel: test failures, agents running, anything
+    # countable. Held until the next state change, like draw.
+    value="${2:-}"
+    case "$value" in
+      ''|*[!0-9]*) printf 'usage: %s number <0-99>\n' "$(basename "$SELF")" >&2; exit 2 ;;
+    esac
+    mkdir -p "$RUNDIR" 2>/dev/null
+    printf '%s\n' "$value" > "$RUNDIR/number"
+    STATE="number"
+    ;;
+  thinking | working | alerting | alert-question | alert-permission | alert-plan \
+    | meeting | busy | number | success | error | compacting | chilling | custom | off)
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|off|draw <image>|end|start|stop|status\n' "$(basename "$SELF")" >&2
+    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|busy|meeting|off\n       %s alert  (reads a Notification payload on stdin)\n       %s number <0-99> | draw <image> | end | start | stop | status\n' "$(basename "$SELF")" "$(basename "$SELF")" "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac

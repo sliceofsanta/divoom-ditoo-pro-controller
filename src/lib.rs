@@ -484,7 +484,9 @@ const SESSION_STALE_AFTER: Duration = Duration::from_secs(900);
 /// busy work, and a failure outranks activity.
 fn priority(state: &str) -> u8 {
   match state {
-    "alerting" => 100,
+    // Every flavour of alert outranks everything: they all mean "you".
+    "alerting" | "alert-question" | "alert-permission" | "alert-plan" => 100,
+    "number" => 95,
     "error" => 90,
     "compacting" => 70,
     "working" => 60,
@@ -633,6 +635,54 @@ fn countdown_animation(minutes: u32) -> DivoomAnimation {
   animation
 }
 
+/// Draw a bare number, for counts the caller wants on the panel: failing
+/// tests, running agents, anything countable. Distinct from the countdown --
+/// no ring, because nothing is draining; this is a quantity, not a timer.
+fn number_animation(value: u32, ink: Rgb<u8>, ground: Rgb<u8>) -> DivoomAnimation {
+  use crate::divoom_file_format::frame::Frame;
+  use crate::divoom_file_format::frame_header::FrameHeader;
+
+  let shown = value.min(99);
+  let mut frames = Vec::new();
+  for bright in [false, true] {
+    let mut image = image::RgbImage::from_pixel(16, 16, ground);
+    let draw_digit = |img: &mut image::RgbImage, glyph: &[u8; 5], x0: u32| {
+      for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..3u32 {
+          if bits & (1 << (2 - col)) != 0 {
+            img.put_pixel(x0 + col, 6 + row as u32, ink);
+          }
+        }
+      }
+    };
+    if shown >= 10 {
+      draw_digit(&mut image, &DIGITS[(shown / 10) as usize], 4);
+      draw_digit(&mut image, &DIGITS[(shown % 10) as usize], 9);
+    } else {
+      draw_digit(&mut image, &DIGITS[shown as usize], 7);
+    }
+    // Corner ticks, alternating, so the panel reads as live rather than frozen.
+    if bright {
+      for (x, y) in [(0u32, 0u32), (15, 0), (0, 15), (15, 15)] {
+        image.put_pixel(x, y, ink);
+      }
+    }
+    frames.push(Frame {
+      header: FrameHeader {
+        time_in_milliseconds: 800,
+        reuse_palette: false,
+        color_count: 0
+      },
+      palette: Vec::new(),
+      local_palette: Vec::new(),
+      image: image::DynamicImage::ImageRgb8(image)
+    });
+  }
+  let mut animation = DivoomAnimation { frames };
+  rebuild_palettes(&mut animation);
+  animation
+}
+
 /// The 60 pixels around the edge of the panel, clockwise from the top-left.
 /// A square display gives this for free, and it is the natural place to show
 /// something draining away.
@@ -725,6 +775,19 @@ fn present<'a>(state: &'a str, held: Duration, timings: &Timings) -> &'a str {
   match state {
     "alerting" if held >= timings.alert_panic => "alerting3",
     "alerting" if held >= timings.alert_escalate => "alerting2",
+    // A classified alert escalates by falling back onto the generic ladder:
+    // knowing WHY it wants you stops being the useful part once you have
+    // ignored it for five minutes.
+    "alert-question" | "alert-permission" | "alert-plan"
+      if held >= timings.alert_panic =>
+    {
+      "alerting3"
+    }
+    "alert-question" | "alert-permission" | "alert-plan"
+      if held >= timings.alert_escalate =>
+    {
+      "alerting2"
+    }
     "success" | "error" if held >= timings.transient => "chilling",
     // A long idle stretch falls through to a screensaver, if one is installed.
     // Only from idle: never interrupt a state that is telling you something.
@@ -766,6 +829,7 @@ pub async fn run_status_daemon(
   // Minutes until the next meeting, written by ditoo-agenda.sh. Shown only
   // when the panel would otherwise be idle.
   let agenda_file = state_file.with_file_name("agenda");
+  let number_file = state_file.with_file_name("number");
   let mut last_agenda: Option<u32> = None;
   let run_dir = state_file.parent().unwrap_or(faces_dir);
   let mut last_context: Option<u8> = None;
@@ -978,6 +1042,47 @@ pub async fn run_status_daemon(
           // before this point, or it only ever runs when the state moves.
           continue;
         }
+        // A requested number is rendered rather than looked up as a face.
+        if face == "number" {
+          let value = std::fs::read_to_string(&number_file)
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok());
+          if let Some(value) = value {
+            let Some(active) = connection.as_mut() else { continue };
+            // Zero is the good news, so it is green; anything else is not.
+            let (ink, ground) = if value == 0 {
+              (Rgb([70, 240, 140]), Rgb([0, 22, 10]))
+            } else {
+              (Rgb([255, 90, 80]), Rgb([28, 2, 2]))
+            };
+            let mut animation = number_animation(value, ink, ground);
+            if let Some(percent) = context_percent {
+              overlay_context_gauge(&mut animation, percent);
+            }
+            let mut buf = Vec::new();
+            if animation.save_to_divoom_format(&mut buf).is_ok() {
+              let mut failed = false;
+              for packet in create_network_packets_from(&buf).unwrap_or_default() {
+                if active.fire_and_forget(&packet).await.is_err() {
+                  failed = true;
+                  break;
+                }
+              }
+              if failed {
+                if let Some(dead) = connection.take() {
+                  dead.disconnect().await.ok();
+                }
+                displayed = None;
+              } else {
+                info!("Applied number: {}", value);
+                let _ = std::fs::write(&applied_file, format!("number-{}\n", value));
+                displayed = Some(face);
+              }
+            }
+            continue;
+          }
+        }
+
         // An idle panel is free real estate: show the countdown instead of the
         // idle face. Anything other than idle is saying something, so it wins.
         if face == "chilling" {
@@ -1580,5 +1685,31 @@ mod status_daemon_tests {
     assert!(near > 0, "some ring should remain at 5 minutes");
     // A full hour fills it.
     assert!(lit_edge(60) >= 58, "an hour out should be a nearly complete ring");
+  }
+
+  #[test]
+  fn every_flavour_of_alert_outranks_ordinary_work() {
+    let now = Duration::ZERO;
+    for flavour in ["alert-question", "alert-permission", "alert-plan"] {
+      let states = vec![
+        ("working".to_string(), now),
+        (flavour.to_string(), now),
+        ("compacting".to_string(), now)
+      ];
+      assert_eq!(merge_sessions(&states).as_deref(), Some(flavour),
+                 "{flavour} should take the panel from busy work");
+    }
+  }
+
+  #[test]
+  fn a_classified_alert_still_escalates() {
+    // Knowing WHY stops mattering once it has been ignored for long enough,
+    // so the classified alerts fall back onto the generic ladder.
+    let timings = t();
+    for flavour in ["alert-question", "alert-permission", "alert-plan"] {
+      assert_eq!(present(flavour, Duration::ZERO, &timings), flavour);
+      assert_eq!(present(flavour, timings.alert_escalate, &timings), "alerting2");
+      assert_eq!(present(flavour, timings.alert_panic, &timings), "alerting3");
+    }
   }
 }
