@@ -1,29 +1,29 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into **Claude's tiny workshop** for
-[Claude Code](https://claude.com/claude-code). The nine states tell one continuous
-construction story: blueprint, materials, hammering, testing, and a finished
-glowing building. Claude and the main prop split the 16x16 stage into two large,
-readable silhouettes instead of filling it with tiny decorative pixels.
+Turn a Divoom Ditoo Pro into a **Clauddy desk companion** for
+[Claude Code](https://claude.com/claude-code). The art follows the wonderfully
+simple staging of [Clauddy MiniToo](https://github.com/bugzmanov/divoom-minitoo/tree/main/apps/clauddy/assets):
+one large flat terracotta mascot, tiny black eyes and feet, charcoal background,
+and one oversized action or prop. The frames are original 16x16 drawings made
+for this display rather than resized copies of the reference assets.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | **BLUEPRINT:** Claude points at a large cyan plan of the workshop |
-| `working` | Claude runs a tool | **HAMMER TIME:** hard-hat Claude swings a huge hammer beside the scaffold |
-| `compacting` | Claude compacts context | **MATERIAL SORT:** loose bricks and planks pack into one tidy crate |
-| `alerting` | Claude needs your input | **TEST WAIT:** the completed shell waits at a slow yellow test light |
-| `alerting2` | still waiting after 1 minute | **STILL WAITING:** two questions and faster orange test flashes |
-| `alerting3` | still waiting after 5 minutes | **SITE ALARM:** both hands up under a rooftop siren and red strobe |
-| `success` | Claude finished responding | **GRAND OPENING:** windows glow, confetti falls, and Claude jumps |
-| `error` | a tool or the turn failed | **BUILD FAILED:** a red crack, smoke, falling brick, and Claude's X eyes |
-| `chilling` | a session starts, or manual | **AFTER HOURS:** Claude sleeps beside one warm workshop window |
+| `thinking` | you submit a prompt | **BLUEPRINT:** Clauddy opens one huge cyan building plan |
+| `working` | Claude runs a tool | **HAMMERING:** Clauddy works a brick at the bench with a huge hammer |
+| `compacting` | Claude compacts context | **SQUEEZE:** loose plan sheets compress into one strapped bundle |
+| `alerting` | Claude needs your input | **HEY:** one slow exclamation and one raised hand |
+| `alerting2` | still waiting after 1 minute | **STILL WAITING:** a larger flashing mark and both hands up |
+| `alerting3` | still waiting after 5 minutes | **ALARM:** giant red strobe and jumping Clauddy |
+| `success` | Claude finished responding | **BUILT:** a finished glowing workshop floats above a happy jump |
+| `error` | a tool or the turn failed | **BROKEN:** the workshop cracks while Clauddy stares with X eyes |
+| `chilling` | a session starts, or manual | **TEA BREAK:** closed eyes, a steaming mug and a tiny floating Z |
 | `off` | the session ends, or manual | blank display |
 
-The camera and stage never move: Claude owns the left half and the project owns
-the right. The hard hat, blueprint, crate, hammer, scaffold, test cable, house
-silhouette and cracked wall are all deliberately oversized. State meaning comes
-from those props and their motion, with colour reserved for cyan planning,
-yellow construction, green success and red failure or urgency.
+Clauddy remains the largest object in every frame. There is no cream face panel,
+costume, scenery or split-screen composition: the terracotta body itself is the
+character. Cyan is reserved for plans and tidy-up, yellow for attention and
+completion, and red only for failure or the final alert escalation.
 
 The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
@@ -45,9 +45,13 @@ A `ditoo` skill in `.claude/skills/` lets Claude reach for this itself.
 
 ## Idle screensaver (optional)
 
-After 30 minutes idle the panel falls through to `screensaver.gif`, if you have
-put one in the faces directory. With no such file it simply stays on
-`chilling`. Only idle ages into it -- a state that is telling you something is
+After 30 minutes idle the panel falls through to `screensaver.gif`. With no
+such file it simply stays on `chilling`.
+
+The bundled one is generated rather than hand-drawn -- `make_screensaver.py`
+builds drifting embers using the palette sampled from the hand-drawn faces, so
+it belongs to the set without being mistakable for a status. Replace it like
+any other face. Only idle ages into it -- a state that is telling you something is
 never interrupted.
 
 ```bash
@@ -285,10 +289,10 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 fallback if no GIF exists. `alerting2` and `alerting3` are the automatic
 one-minute and five-minute escalations used by the daemon.
 
-To edit the bundled ones, change the workshop scenes in
+To edit the bundled ones, change the Clauddy scenes in
 [`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The same file
-contains reusable drawing primitives for the blueprint, materials crate,
-scaffold, hammer, test light and finished workshop:
+contains reusable drawing primitives for Clauddy, the blueprint, compressed
+material bundle, workbench, hammer, exclamation and tiny workshop:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -304,9 +308,9 @@ props and sparks deliberately run on different beats. And every jump uses a
 short launch plus a held apex; evenly spaced positions look like teleportation
 at this scale.
 
-The workshop is drawn from scratch directly on the 16x16 grid. Claude's reusable
-body rig lives in [`faces/mascot.py`](faces/mascot.py), so his face, terracotta
-body and four-foot silhouette remain consistent across every scene.
+The faces are drawn from scratch directly on the 16x16 grid. The generator uses
+the shared low-level pixel helpers in [`faces/mascot.py`](faces/mascot.py), while
+its own flat Clauddy rig keeps the body, eyes, arms and four feet consistent.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you
