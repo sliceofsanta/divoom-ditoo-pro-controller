@@ -387,6 +387,18 @@ case "${1:-}" in
     fi
     exit 0
     ;;
+  turn)
+    # A human just started a turn. Two things follow from that, and both are
+    # about the panel not lying once you are back at the keyboard:
+    #
+    #   - last turn's fan-out pips are not this turn's news, so clear them;
+    #   - the daemon holds a verdict indefinitely while nobody has come back to
+    #     it, so a build that failed overnight is still red in the morning.
+    #     This is the "came back" signal that releases the hold.
+    rm -f "$RUNDIR/fanout" "$RUNDIR/fanout.start" "$RUNDIR/fanout.done" 2>/dev/null
+    : > "$RUNDIR/last-prompt" 2>/dev/null
+    exit 0
+    ;;
   fanout)
     # Track a fan-out of parallel agents, drawn as pips along the top row.
     #
@@ -430,7 +442,7 @@ case "${1:-}" in
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|busy|meeting|off\n       %s alert  (reads a Notification payload on stdin)\n       %s number <0-99> | fanout start|done|clear\n       %s draw <image> | end | start | stop | status\n' "$(basename "$SELF")" "$(basename "$SELF")" "$(basename "$SELF")" >&2
+    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|busy|meeting|off\n       %s alert  (reads a Notification payload on stdin)\n       %s number <0-99> | fanout start|done|clear | turn\n       %s draw <image> | end | start | stop | status\n' "$(basename "$SELF")" "$(basename "$SELF")" "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac

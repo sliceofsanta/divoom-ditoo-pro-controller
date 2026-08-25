@@ -589,9 +589,33 @@ fn priority(state: &str) -> u8 {
 fn merge_sessions(states: &[(String, Duration)]) -> Option<String> {
   states
     .iter()
-    .filter(|(_, age)| *age < SESSION_STALE_AFTER)
+    .filter(|(state, age)| *age < SESSION_STALE_AFTER || is_verdict(state))
     .max_by_key(|(state, _)| priority(state))
     .map(|(state, _)| state.clone())
+}
+
+/// Has the user typed since `since`?
+///
+/// Absent file means no signal at all, which must read as "yes": a setup that
+/// never touches it should behave exactly as it did before this existed,
+/// rather than silently pinning every verdict on the panel forever.
+fn returned_since(prompt_file: &Path, since: std::time::SystemTime) -> bool {
+  std::fs::metadata(prompt_file)
+    .and_then(|m| m.modified())
+    .map(|seen| seen >= since)
+    .unwrap_or(true)
+}
+
+/// States that report how something ENDED, rather than what is happening now.
+///
+/// The distinction decides what is allowed to go stale. "working" is a claim
+/// about the present and expires with the session that made it -- left to sit,
+/// it would have the panel insisting on work nobody is doing. A verdict is a
+/// claim about the past, and staying true is the whole point: a build that
+/// failed at 3am should still say so at 9, which is precisely when a stale
+/// session file is all that is left of it.
+fn is_verdict(state: &str) -> bool {
+  matches!(state.trim_end_matches(":now"), "success" | "error" | "number")
 }
 
 /// Read each live session's requested state from `dir`, newest-first on ties.
@@ -920,7 +944,14 @@ pub async fn run_status_daemon(
   // Parallel agents, as "done/total", written by the SubagentStart and
   // SubagentStop hooks.
   let fanout_file = state_file.with_file_name("fanout");
+  // Touched by the UserPromptSubmit hook: the only evidence the daemon has
+  // that a human is actually at the keyboard.
+  let prompt_file = state_file.with_file_name("last-prompt");
   let mut last_agenda: Option<u32> = None;
+  // Wall-clock twin of `requested_since`. Needed because the question "has the
+  // user typed since this verdict" compares against a file mtime, and monotonic
+  // Instants cannot be compared to one.
+  let mut requested_at_wall = std::time::SystemTime::now();
   let run_dir = state_file.parent().unwrap_or(faces_dir);
   let mut last_overlays = Overlays::default();
   // `requested` is what the hooks asked for; `displayed` is the face actually
@@ -1039,7 +1070,19 @@ pub async fn run_status_daemon(
           info!("Focus mode {}", if focus { "on: alerts escalate faster" } else { "off" });
           focus_was = focus;
         }
-        let timings = effective_timings(&timings, focus);
+        let mut timings = effective_timings(&timings, focus);
+
+        // A verdict nobody has come back to is still news, so hold it rather
+        // than letting it decay to idle on a schedule. The six-second decay is
+        // right when you are sitting there and wrong when you are not: a suite
+        // that went red while you slept should still be red when you sit down.
+        //
+        // "Come back" means typing something -- the UserPromptSubmit hook
+        // touches this file -- so the verdict clears itself the moment you
+        // start the next piece of work, and not before.
+        if is_verdict(&requested) && !returned_since(&prompt_file, requested_at_wall) {
+          timings.transient = Duration::MAX;
+        }
 
         // Opt-in decorations. Both are absent by default, because the faces
         // are drawn by hand and painting over a row of them should be the
@@ -1127,6 +1170,7 @@ pub async fn run_status_daemon(
           }
           requested = state;
           requested_since = now;
+          requested_at_wall = wall_now;
         }
 
         // Re-evaluated every tick, not just on change: escalation and decay
@@ -1599,6 +1643,56 @@ mod status_daemon_tests {
     // Every session dead means nothing to show at all.
     assert_eq!(merge_sessions(&[("alerting".into(), dead)]), None);
     assert_eq!(merge_sessions(&[]), None);
+  }
+
+  #[test]
+  fn a_verdict_outlives_the_session_that_reported_it() {
+    // The morning case. A suite that went red overnight leaves nothing behind
+    // but a stale session file, and expiring it the way "working" expires
+    // would throw away the one thing worth walking up to the desk for.
+    let dead = SESSION_STALE_AFTER + Duration::from_secs(60 * 60 * 8);
+    assert_eq!(merge_sessions(&[("error".into(), dead)]).as_deref(), Some("error"));
+    assert_eq!(merge_sessions(&[("success".into(), dead)]).as_deref(), Some("success"));
+    assert_eq!(merge_sessions(&[("number".into(), dead)]).as_deref(), Some("number"));
+
+    // But a claim about the PRESENT still expires, verdict or not -- and a live
+    // session still outranks last night's news.
+    for now_claim in ["working", "thinking", "compacting", "alerting", "chilling"] {
+      assert_eq!(
+        merge_sessions(&[(now_claim.into(), dead)]),
+        None,
+        "{:?} is a claim about now and must expire",
+        now_claim
+      );
+    }
+    assert_eq!(
+      merge_sessions(&[
+        ("success".into(), dead),
+        ("alerting".into(), Duration::from_secs(1))
+      ])
+      .as_deref(),
+      Some("alerting"),
+      "something needing you now beats last night's verdict"
+    );
+  }
+
+  #[test]
+  fn a_verdict_holds_until_someone_comes_back() {
+    let dir = std::env::temp_dir().join(format!("ditoo-返-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let prompt = dir.join("last-prompt");
+
+    // No file at all is no signal, and no signal must behave exactly as it did
+    // before any of this existed -- never pin a verdict on the panel forever.
+    assert!(returned_since(&prompt, std::time::SystemTime::now()));
+
+    std::fs::write(&prompt, "").unwrap();
+    let long_ago = std::time::SystemTime::now() - Duration::from_secs(600);
+    let ahead = std::time::SystemTime::now() + Duration::from_secs(600);
+    assert!(returned_since(&prompt, long_ago), "typed after the verdict: released");
+    assert!(!returned_since(&prompt, ahead), "not typed since: still holding");
+
+    std::fs::remove_dir_all(&dir).ok();
   }
 
   #[test]
