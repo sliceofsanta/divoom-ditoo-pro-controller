@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.sliceofsanta.ditoo-agenda</string>
+
+  <!-- Refreshes the minutes-until-next-meeting the daemon renders. Separate
+       from the daemon agent so a calendar problem can never take the panel
+       down: worst case this stops updating and the countdown clears. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PREFIX__/ditoo-agenda.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Once a minute. The countdown is in whole minutes, so anything faster
+       would redraw the panel without changing what it says. -->
+  <key>StartInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>__RUNDIR__/agenda.log</string>
+  <key>StandardErrorPath</key>
+  <string>__RUNDIR__/agenda.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

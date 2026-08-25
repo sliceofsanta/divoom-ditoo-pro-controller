@@ -25,7 +25,8 @@ RUNDIR="${DITOO_RUNDIR:-$HOME/.claude/ditoo}"
 
 if [ "${1:-}" = "remove" ]; then
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
-  rm -f "$TARGET"
+  launchctl bootout "gui/$(id -u)/com.sliceofsanta.ditoo-agenda" 2>/dev/null
+  rm -f "$TARGET" "$HOME/Library/LaunchAgents/com.sliceofsanta.ditoo-agenda.plist"
   "$HERE/ditoo-state.sh" stop >/dev/null 2>&1
   rm -rf "$PREFIX"
   printf 'removed %s and %s\n' "$LABEL" "$PREFIX"
@@ -47,6 +48,12 @@ mkdir -p "$PREFIX/faces" "$HOME/Library/LaunchAgents" "$RUNDIR"
 cp "$BIN" "$PREFIX/divoom-ditoo-pro-controller"
 cp "$HERE/ditoo-state.sh" "$HERE/ditoo-context.sh" "$PREFIX/"
 cp "$HERE"/faces/*.gif "$HERE"/faces/*.png "$PREFIX/faces/" 2>/dev/null
+# The calendar helper is an .app bundle because only a bundle can raise the
+# Calendar permission prompt. Copy it whole so the signature survives.
+if [ -d "$HERE/macos/DitooAgenda.app" ]; then
+  rm -rf "$PREFIX/DitooAgenda.app"
+  cp -R "$HERE/macos/DitooAgenda.app" "$PREFIX/"
+fi
 chmod +x "$PREFIX/divoom-ditoo-pro-controller" "$PREFIX"/*.sh
 
 sed -e "s|__SCRIPT__|$PREFIX/ditoo-state.sh|g" \
@@ -57,6 +64,17 @@ sed -e "s|__SCRIPT__|$PREFIX/ditoo-state.sh|g" \
 # bootout is asynchronous: bootstrapping straight after it races the teardown
 # and fails, even though the job loads correctly a moment later. Wait for the
 # old job to actually go, then retry the load a few times before believing it.
+# The agenda refresher is a second, independent agent -- see its plist.
+AGENDA_LABEL="com.sliceofsanta.ditoo-agenda"
+AGENDA_TARGET="$HOME/Library/LaunchAgents/$AGENDA_LABEL.plist"
+if [ -f "$HERE/$AGENDA_LABEL.plist" ]; then
+  sed -e "s|__PREFIX__|$PREFIX|g" -e "s|__RUNDIR__|$RUNDIR|g" \
+      "$HERE/$AGENDA_LABEL.plist" > "$AGENDA_TARGET"
+  launchctl bootout "gui/$(id -u)/$AGENDA_LABEL" 2>/dev/null
+  sleep 1
+  launchctl bootstrap "gui/$(id -u)" "$AGENDA_TARGET" 2>/dev/null
+fi
+
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || break

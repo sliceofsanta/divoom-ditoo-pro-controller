@@ -59,10 +59,27 @@ outranks it, so an alert still wins.
 * * * * * /ABSOLUTE/PATH/ditoo-agenda.sh            # keep it current
 ```
 
-It needs Calendar access granted to `macos/ditoo-next-event` under **System
-Settings > Privacy & Security > Calendars**. Without it nothing is written and
-the panel just shows the normal idle face -- the countdown is additive, never a
-prerequisite.
+`install-launchagent.sh` also registers a second agent that refreshes the
+number every minute, so once installed there is nothing to run by hand.
+
+**Granting calendar access.** The helper is an `.app` bundle
+(`macos/DitooAgenda.app`) rather than a plain binary, and the reason is worth
+knowing: the Calendars pane in System Settings has no "add application" button
+-- an app can only appear there by ASKING, and macOS will not show that prompt
+for a CLI binary launched from a non-GUI parent. A bundle can ask. Launch it
+once and allow the prompt:
+
+```bash
+open -a integrations/claude-code/macos/DitooAgenda.app
+```
+
+For the same reason `ditoo-agenda.sh` starts it with `open` rather than running
+the executable inside the bundle: TCC grants the BUNDLE, and invoking the inner
+binary from a shell attributes the request to whatever spawned the shell, which
+is refused.
+
+Without the grant nothing is written and the panel shows the normal idle face
+-- the countdown is additive, never a prerequisite.
 
 ## Launcher shortcuts
 
