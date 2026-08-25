@@ -564,26 +564,40 @@ fn countdown_animation(minutes: u32) -> DivoomAnimation {
   use crate::divoom_file_format::frame_header::FrameHeader;
 
   // Calm while it is far off, amber inside ten minutes, red inside three.
-  let (ink, ground) = match minutes {
-    0..=2 => (Rgb([255, 90, 80]), Rgb([28, 2, 2])),
-    3..=9 => (Rgb([255, 180, 60]), Rgb([24, 14, 0])),
-    _ => (Rgb([120, 190, 240]), Rgb([4, 10, 20]))
+  let (ink, ground, track) = match minutes {
+    0..=2 => (Rgb([255, 90, 80]), Rgb([28, 2, 2]), Rgb([70, 12, 12])),
+    3..=9 => (Rgb([255, 180, 60]), Rgb([24, 14, 0]), Rgb([64, 40, 8])),
+    _ => (Rgb([120, 190, 240]), Rgb([4, 10, 20]), Rgb([20, 38, 58]))
   };
 
   let shown = minutes.min(99);
   let tens = (shown / 10) as usize;
   let ones = (shown % 10) as usize;
 
+  // The ring is what makes the number mean something. A bare "9" could be nine
+  // of anything; a ring visibly draining around it reads as time running out
+  // without needing to be explained. It is a timer, which everyone has seen.
+  let ring = ring_positions();
+  let remaining = ((minutes.min(AGENDA_HORIZON_MINUTES) as usize) * ring.len())
+    .div_ceil(AGENDA_HORIZON_MINUTES as usize);
+
   let mut frames = Vec::new();
-  // Two frames: the ring breathes, so the panel reads as live rather than a
-  // frozen error state.
   for pulse in [false, true] {
     let mut image = image::RgbImage::from_pixel(16, 16, ground);
+
+    // Full ring dim, then the part still to run in the live colour.
+    for (x, y) in &ring {
+      image.put_pixel(*x, *y, track);
+    }
+    for (x, y) in ring.iter().take(remaining) {
+      image.put_pixel(*x, *y, ink);
+    }
+
     let draw_digit = |img: &mut image::RgbImage, glyph: &[u8; 5], x0: u32| {
       for (row, bits) in glyph.iter().enumerate() {
         for col in 0..3u32 {
           if bits & (1 << (2 - col)) != 0 {
-            img.put_pixel(x0 + col, 5 + row as u32, ink);
+            img.put_pixel(x0 + col, 6 + row as u32, ink);
           }
         }
       }
@@ -594,16 +608,18 @@ fn countdown_animation(minutes: u32) -> DivoomAnimation {
     } else {
       draw_digit(&mut image, &DIGITS[ones], 7);
     }
-    // A single lit corner pair, alternating, is enough motion to read as alive
-    // without drawing the eye the way a full animation would.
-    if pulse {
-      for (x, y) in [(0u32, 0u32), (15, 0), (0, 15), (15, 15)] {
-        image.put_pixel(x, y, ink);
+
+    // Inside the last three minutes the whole thing blinks, because by then
+    // you should be looking up rather than reading a number.
+    if pulse && minutes <= 2 {
+      for (x, y) in &ring {
+        image.put_pixel(*x, *y, ground);
       }
     }
+
     frames.push(Frame {
       header: FrameHeader {
-        time_in_milliseconds: 700,
+        time_in_milliseconds: if minutes <= 2 { 400 } else { 900 },
         reuse_palette: false,
         color_count: 0
       },
@@ -615,6 +631,26 @@ fn countdown_animation(minutes: u32) -> DivoomAnimation {
   let mut animation = DivoomAnimation { frames };
   rebuild_palettes(&mut animation);
   animation
+}
+
+/// The 60 pixels around the edge of the panel, clockwise from the top-left.
+/// A square display gives this for free, and it is the natural place to show
+/// something draining away.
+fn ring_positions() -> Vec<(u32, u32)> {
+  let mut out = Vec::with_capacity(60);
+  for x in 0..16 {
+    out.push((x, 0));
+  }
+  for y in 1..16 {
+    out.push((15, y));
+  }
+  for x in (0..15).rev() {
+    out.push((x, 15));
+  }
+  for y in (1..15).rev() {
+    out.push((0, y));
+  }
+  out
 }
 
 /// Whether a macOS Focus mode is currently on.
@@ -1515,5 +1551,34 @@ mod status_daemon_tests {
     assert_eq!(present("alerting", Duration::from_secs(29), &focused), "alerting");
     assert_eq!(present("alerting", Duration::from_secs(30), &focused), "alerting2");
     assert_eq!(present("alerting", Duration::from_secs(150), &focused), "alerting3");
+  }
+
+  #[test]
+  fn the_countdown_ring_drains_as_the_meeting_nears() {
+    // The ring is what makes the number legible as a countdown, so it has to
+    // actually shrink. Count lit edge pixels at three distances.
+    let lit_edge = |minutes: u32| {
+      let animation = countdown_animation(minutes);
+      let image = animation.frames[0].image.to_rgb8();
+      let ground = *image.get_pixel(8, 2);
+      ring_positions()
+        .iter()
+        .filter(|(x, y)| {
+          let p = image.get_pixel(*x, *y);
+          // "lit" = clearly brighter than both the ground and the dim track
+          p[0] as u16 + p[1] as u16 + p[2] as u16
+            > ground[0] as u16 + ground[1] as u16 + ground[2] as u16 + 180
+        })
+        .count()
+    };
+
+    let far = lit_edge(55);
+    let mid = lit_edge(30);
+    let near = lit_edge(5);
+    assert!(far > mid, "55 min should light more of the ring than 30 ({far} vs {mid})");
+    assert!(mid > near, "30 min should light more of the ring than 5 ({mid} vs {near})");
+    assert!(near > 0, "some ring should remain at 5 minutes");
+    // A full hour fills it.
+    assert!(lit_edge(60) >= 58, "an hour out should be a nearly complete ring");
   }
 }

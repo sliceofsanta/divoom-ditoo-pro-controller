@@ -49,10 +49,18 @@ that passed in four seconds.
 
 ## Next-meeting countdown (optional)
 
-When the panel is idle and a calendar event starts within the hour, it shows
-the minutes remaining instead of the idle face -- calm, then amber inside ten
-minutes, then red inside three. Anything that is actually telling you something
-outranks it, so an alert still wins.
+When the panel is idle and a meeting starts within the hour, it shows how many
+minutes are left: the number in the middle, and a ring around the edge that
+drains as the time runs out.
+
+The ring is doing the explaining. A bare number could be nine of anything --
+minutes, messages, o'clock. A ring visibly emptying around it is a timer, which
+needs no caption. The colour backs it up: blue while it is far off, amber
+inside ten minutes, red inside three, and in the last three minutes the ring
+blinks, because by then you should be looking up rather than reading a number.
+
+Anything that is actually telling you something outranks it, so an alert still
+wins.
 
 ```bash
 ./integrations/claude-code/ditoo-agenda.sh          # writes the number once
