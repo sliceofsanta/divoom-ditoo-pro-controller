@@ -216,6 +216,20 @@ impl DeviceConnection {
     await_response(&mut self.response_rx, expected_command).await
   }
 
+
+  /// Take every response waiting in the channel, without blocking.
+  ///
+  /// The daemon only ever fires and forgets, so nothing else consumes this
+  /// channel -- and the device sends unsolicited frames of its own accord.
+  /// Left undrained it grows for as long as the daemon runs.
+  pub(crate) fn drain_responses(&mut self) -> Vec<Response> {
+    let mut out = Vec::new();
+    while let Ok(response) = self.response_rx.try_recv() {
+      out.push(response);
+    }
+    out
+  }
+
   pub(crate) async fn fire_and_forget(&mut self, packet: &Packet) -> Result<(), Box<dyn Error>> {
     let serialized = packet.serialize()?;
     debug!("fire_and_forget 0x{:02x}: {}", packet.command.value(), hex::encode(&serialized));

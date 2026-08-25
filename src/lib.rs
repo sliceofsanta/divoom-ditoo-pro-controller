@@ -662,6 +662,22 @@ pub async fn run_status_daemon(
         if displayed.as_deref() == Some(face.as_str()) {
           continue;
         }
+        // Drain anything the device sent us. Nothing else consumes this
+        // channel in daemon mode, so skipping it leaks for the daemon's whole
+        // lifetime. It is also the only chance to observe the device's
+        // unsolicited frames -- command 0xF7 shows up unprompted and nobody
+        // has worked out what it means.
+        if let Some(active) = connection.as_mut() {
+          for response in active.drain_responses() {
+            info!(
+              "Unsolicited frame: command 0x{:02x} ack={} data={}",
+              response.original_command,
+              response.ack,
+              hex::encode(&response.data)
+            );
+          }
+        }
+
         // Resolve the image BEFORE touching the connection: a missing face is
         // a content problem and must not cost a healthy link.
         let Some(path) = face_path(faces_dir, &face) else {
