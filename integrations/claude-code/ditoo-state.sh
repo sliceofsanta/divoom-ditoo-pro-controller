@@ -105,6 +105,16 @@ count_lines() {
 # Extracted with grep rather than a JSON parser on purpose: this runs on every
 # hook, and spawning python here would cost more than the rest of the script.
 session_id() {
+  # An explicit name wins. This is how anything that is NOT a Claude Code hook
+  # -- ditoo-watch.sh, a CI wrapper, a cron job -- takes part in the merge as a
+  # peer instead of fighting every session for the single "manual" slot.
+  if [ -n "${DITOO_SESSION:-}" ]; then
+    case "$DITOO_SESSION" in
+      *[!a-zA-Z0-9_-]* ) printf 'manual' ;;
+      * ) printf '%s' "$DITOO_SESSION" ;;
+    esac
+    return 0
+  fi
   local raw=""
   if [ ! -t 0 ]; then
     raw="$(head -c 4096 2>/dev/null)"
@@ -438,7 +448,12 @@ case "${1:-}" in
     STATE="number"
     ;;
   thinking | working | alerting | alert-question | alert-permission | alert-plan \
-    | meeting | busy | number | success | error | compacting | chilling | custom | off)
+    | meeting | busy | number | success | error | compacting | chilling | custom | off \
+    | success:now | error:now)
+    # The ":now" pair are verdicts the caller is ASSERTING: shown as asked
+    # rather than having to earn a celebration by taking long enough. Listed
+    # explicitly rather than matched as a suffix, so a typo is still a usage
+    # error instead of a state the daemon will not find a face for.
     STATE="$1"
     ;;
   *)

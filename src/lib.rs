@@ -570,6 +570,12 @@ const SESSION_STALE_AFTER: Duration = Duration::from_secs(900);
 /// anything need me? So a session blocked on input outranks every amount of
 /// busy work, and a failure outranks activity.
 fn priority(state: &str) -> u8 {
+  // ":now" is a presentation hint -- "this is a real verdict, do not make it
+  // earn a celebration" -- and must not change where a state sits in the
+  // merge. Left unstripped it fell through to the unknown-state score of 5,
+  // BELOW idle, so every explicit verdict ditoo-run.sh reported lost the panel
+  // to any window that happened to be sitting idle.
+  let state = state.trim_end_matches(":now");
   match state {
     // Every flavour of alert outranks everything: they all mean "you".
     "alerting" | "alert-question" | "alert-permission" | "alert-plan" => 100,
@@ -1643,6 +1649,22 @@ mod status_daemon_tests {
     // Every session dead means nothing to show at all.
     assert_eq!(merge_sessions(&[("alerting".into(), dead)]), None);
     assert_eq!(merge_sessions(&[]), None);
+  }
+
+  #[test]
+  fn an_explicit_verdict_still_outranks_an_idle_session() {
+    // ":now" marks a verdict the caller is asserting rather than a Claude turn
+    // that has to earn a celebration. It is a presentation hint, so it must not
+    // change where the state sits in the merge -- a failed build outranks an
+    // idle window whether or not it carries the suffix.
+    let now = Duration::from_secs(1);
+    assert_eq!(priority("error:now"), priority("error"));
+    assert_eq!(priority("success:now"), priority("success"));
+    assert_eq!(
+      merge_sessions(&[("error:now".into(), now), ("chilling".into(), now)]).as_deref(),
+      Some("error:now"),
+      "a failed build must not lose to an idle window"
+    );
   }
 
   #[test]
