@@ -302,6 +302,69 @@ fn resolve_font(font: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
   }
 }
 
+/// Claim the daemon's pid file, taking over from a dead predecessor.
+///
+/// A plain create-if-absent is not enough for a supervised service. Kill the
+/// daemon with SIGKILL -- or lose it to a panic or a power cut -- and the file
+/// survives with a pid nobody owns; every relaunch then refuses to start and
+/// the panel stays dead until a human deletes it by hand. Under launchd that
+/// is a permanent outage produced by the safety check itself.
+fn claim_pid_file(pid_file: &std::path::Path) -> Result<RemoveOnDrop, Box<dyn Error>> {
+  use std::io::Write;
+
+  for attempt in 0..2 {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    match options.open(pid_file) {
+      Ok(mut file) => {
+        writeln!(file, "{}", std::process::id())?;
+        return Ok(RemoveOnDrop(pid_file.to_path_buf()));
+      }
+      Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt == 0 => {
+        let existing = std::fs::read_to_string(pid_file)
+          .ok()
+          .and_then(|v| v.trim().parse::<u32>().ok());
+        match existing {
+          Some(pid) if pid_is_running(pid) => {
+            return Err(format!(
+              "Another daemon is already running (pid {})", pid
+            ).into());
+          }
+          other => {
+            info!(
+              "Taking over a stale pid file (pid {} is gone)",
+              other.map(|p| p.to_string()).unwrap_or_else(|| "unknown".into())
+            );
+            std::fs::remove_file(pid_file)?;
+          }
+        }
+      }
+      Err(e) => return Err(e.into())
+    }
+  }
+  Err("Could not claim the daemon pid file".into())
+}
+
+/// Whether a process with this id exists. `kill -0` signals nothing; it only
+/// reports whether the target could be signalled.
+fn pid_is_running(pid: u32) -> bool {
+  #[cfg(unix)]
+  {
+    std::process::Command::new("kill")
+      .args(["-0", &pid.to_string()])
+      .stdout(std::process::Stdio::null())
+      .stderr(std::process::Stdio::null())
+      .status()
+      .map(|status| status.success())
+      .unwrap_or(false)
+  }
+  #[cfg(not(unix))]
+  {
+    let _ = pid;
+    true
+  }
+}
+
 /// Deletes the wrapped path when dropped; used for the daemon's pid file.
 struct RemoveOnDrop(PathBuf);
 
@@ -554,23 +617,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
       // single-instance guard and how scripts find us. Stale files (a killed
       // daemon) are cleaned up by the caller; see integrations/claude-code.
       let pid_file = state_file.with_file_name("daemon.pid");
-      let mut options = std::fs::OpenOptions::new();
-      options.write(true).create_new(true);
-      let pid_guard = match options.open(&pid_file) {
-        Ok(mut file) => {
-          use std::io::Write;
-          writeln!(file, "{}", std::process::id())?;
-          RemoveOnDrop(pid_file)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-          return Err(format!(
-            "Another daemon appears to be running ({} exists). \
-             If it is not, delete the file and retry.",
-            pid_file.display()
-          ).into());
-        }
-        Err(e) => return Err(e.into())
-      };
+      let pid_guard = claim_pid_file(&pid_file)?;
       info!("Starting status daemon (pid file {})", pid_guard.0.display());
       run_status_daemon(mac, &state_file, &faces_dir).await?
     }

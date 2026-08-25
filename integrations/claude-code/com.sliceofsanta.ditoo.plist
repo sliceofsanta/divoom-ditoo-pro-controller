@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.sliceofsanta.ditoo</string>
+
+  <!-- Runs the daemon DIRECTLY rather than through ditoo-state.sh start.
+       The wrapper backgrounds the daemon and exits, and launchd then reaps the
+       orphaned child -- the daemon connected and was killed seconds later.
+       launchd supervises a foreground process; give it one. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PREFIX__/divoom-ditoo-pro-controller</string>
+    <string>daemon</string>
+    <string>__RUNDIR__/desired</string>
+    <string>__PREFIX__/faces</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart whenever it exits: the daemon is meant to run forever, so any
+       exit -- a lost connection it could not rebuild, a crash, a stop -- means
+       the panel has gone dead and should come back. -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Bluetooth is not ready the instant the user logs in; retrying too fast
+       just burns attempts against a device that is not yet reachable. -->
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>__RUNDIR__/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__RUNDIR__/launchd.log</string>
+
+  <!-- Point the daemon at the installed copies, not the repository: the
+       repository lives in ~/Documents, which a LaunchAgent may not touch. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DITOO_BIN</key>
+    <string>__PREFIX__/divoom-ditoo-pro-controller</string>
+    <key>DITOO_FACES_DIR</key>
+    <string>__PREFIX__/faces</string>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
