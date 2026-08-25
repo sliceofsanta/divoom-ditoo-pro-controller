@@ -2,27 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>
-  <string>DitooAgenda</string>
-  <key>CFBundleDisplayName</key>
-  <string>Ditoo Agenda</string>
   <key>CFBundleIdentifier</key>
   <string>local.ditoo.agenda</string>
-  <key>CFBundleExecutable</key>
-  <string>DitooAgenda</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleVersion</key>
-  <string>1.0</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <!-- Agent app: no Dock icon, no menu bar. It runs, reads the next event,
-       writes the number and exits. -->
-  <key>LSUIElement</key>
-  <true/>
   <key>NSCalendarsUsageDescription</key>
-  <string>Shows a countdown to your next meeting on your Divoom Ditoo Pro LED panel.</string>
+  <string>Shows a countdown to your next meeting on a Divoom Ditoo Pro LED panel.</string>
   <key>NSCalendarsFullAccessUsageDescription</key>
-  <string>Shows a countdown to your next meeting on your Divoom Ditoo Pro LED panel.</string>
+  <string>Shows a countdown to your next meeting on a Divoom Ditoo Pro LED panel.</string>
 </dict>
 </plist>

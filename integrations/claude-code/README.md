@@ -20,6 +20,39 @@ for this display rather than resized copies of the reference assets.
 | `chilling` | a session starts, or manual | **TEA BREAK:** closed eyes, a steaming mug and a tiny floating Z |
 | `off` | the session ends, or manual | blank display |
 
+Alerts split by what they actually want from you, so you can tell a keystroke
+from twenty minutes of reading without walking over:
+
+| State | When | Animation |
+|---|---|---|
+| `alert-permission` | a permission prompt | orange padlock -- one keystroke, go press it |
+| `alert-question` | a question | amber question mark -- needs thought |
+| `alert-plan` | a plan to review | violet page of text -- sit down and read |
+
+Anything unrecognised stays plain `alerting` rather than guessing wrong. All
+three outrank ordinary work and all three fall back onto the same escalation
+ladder once ignored, because after five minutes *why* it wants you stops being
+the useful part.
+
+Two more face outward, at whoever is deciding whether to walk over, and only
+ever appear when the panel would otherwise be idle:
+
+| State | When | Animation |
+|---|---|---|
+| `meeting` | you are in one right now | teal calendar |
+| `busy` | macOS Focus is on | one heavy red bar |
+
+## Parallel agents
+
+When a turn fans out into subagents, the top row grows one pip per agent --
+bright for finished, dim for still running -- so a long fan-out says how much
+of it is left instead of just "working". Wired to the `SubagentStart` and
+`SubagentStop` hooks (note: *not* `TaskCreated`/`TaskCompleted`, which are for
+teammates and never fire for subagents). Pips clear at the start of each turn.
+
+Past 16 agents the pips would be thinner than a pixel, so it scales down to a
+proportion, rounded down -- it will never claim more progress than there is.
+
 Clauddy remains the largest object in every frame. There is no cream face panel,
 costume, scenery or split-screen composition: the terracotta body itself is the
 character. Cyan is reserved for plans and tidy-up, yellow for attention and
@@ -47,6 +80,38 @@ daemon the caller means it: the earned-celebration rule (ten minutes of work
 before a celebration counts) is right for a Claude turn and wrong for a build
 that passed in four seconds.
 
+## Watching anything that can be checked from a shell
+
+```bash
+./integrations/claude-code/ditoo-watch.sh --name ci --interval 60 -- \
+  gh run list -R me/repo -L1 --json conclusion -q '.[0].conclusion=="success"'
+
+./integrations/claude-code/ditoo-watch.sh --name tests --count -- \
+  sh -c 'grep -c FAIL out.txt'
+```
+
+Where `ditoo-run.sh` wraps a command you are running, this polls one you are
+waiting on -- a CI run, a deploy, a queue draining. Exit 0 is `success`,
+anything else is `error`; `--count` shows the first integer the command prints
+instead, which is how a suite reports *how much* failed rather than just that
+it did. Zero is green, anything else red.
+
+Each watch takes its own slot in the merge, so several run at once and the one
+with the worst news wins -- and something that needs YOU still outranks all of
+them. Ctrl-C releases the slot.
+
+## Coming back to it later
+
+A verdict does not decay to idle while nobody has come back to it. The
+six-second decay is right when you are sitting there and wrong when you are
+not, so a suite that went red overnight is still red when you sit down. Typing
+anything releases the hold, which is what the `turn` subcommand on
+`UserPromptSubmit` signals.
+
+For the same reason a verdict outlives its session going stale: `working` is a
+claim about the present and expires with the session that made it, but a
+verdict is a claim about the past and staying true is the point.
+
 ## Next-meeting countdown (optional)
 
 When the panel is idle and a meeting starts within the hour, it shows how many
@@ -61,6 +126,12 @@ blinks, because by then you should be looking up rather than reading a number.
 
 Anything that is actually telling you something outranks it, so an alert still
 wins.
+
+The same helper also reports a meeting **already under way**, which shows the
+`meeting` glyph instead of a countdown. They are different questions for
+different people: a countdown faces inward, at you deciding whether to start
+something; the meeting glyph faces outward, at whoever is deciding whether to
+walk over. Being in one outranks one that is merely coming.
 
 ```bash
 ./integrations/claude-code/ditoo-agenda.sh          # writes the number once
@@ -159,6 +230,16 @@ never interrupted.
 ```bash
 DITOO_SCREENSAVER_AFTER_SECS=0    # switch it off entirely
 ```
+
+Or hand the panel back to the device's own clock instead of showing art:
+
+```bash
+echo 61 > ~/.claude/ditoo/clock     # any clock face id; remove the file to undo
+```
+
+A clock is the one thing an animation cannot be -- it shows the actual time --
+so an idle panel in the evening is more use telling you that. It takes effect
+immediately, and the next state to say something takes the panel straight back.
 
 ## Context fuel gauge (optional)
 
@@ -349,6 +430,7 @@ All optional, set as environment variables:
 | `DITOO_FACES_DIR` | `faces/` next to the script | where the GIF/PNG faces live |
 | `DITOO_RUNDIR` | `~/.claude/ditoo` | state files and log |
 | `DITOO_OFF_CLOCK_ID` | unset | make `off` restore this clock face instead of blanking |
+| `DITOO_SESSION` | from the hook payload | name this caller's slot in the merge; used by `ditoo-watch.sh` |
 | `DITOO_RUST_LOG` | `warn` | controller log level; set `debug` to diagnose device problems |
 | `DITOO_LOG_MAX_LINES` | `500` | log is trimmed to 200 lines once it exceeds this |
 | `DITOO_ALERT_ESCALATE_SECS` | `60` | how long a blocked alert runs before it escalates |

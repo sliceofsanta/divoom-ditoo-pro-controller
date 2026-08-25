@@ -7,7 +7,7 @@
 
   <!-- Runs the daemon DIRECTLY rather than through ditoo-state.sh start.
        The wrapper backgrounds the daemon and exits, and launchd then reaps the
-       orphaned child -- the daemon connected and was killed seconds later.
+       orphaned child — the daemon connected and was killed seconds later.
        launchd supervises a foreground process; give it one. -->
   <key>ProgramArguments</key>
   <array>
@@ -21,7 +21,7 @@
   <true/>
 
   <!-- Restart whenever it exits: the daemon is meant to run forever, so any
-       exit -- a lost connection it could not rebuild, a crash, a stop -- means
+       exit — a lost connection it could not rebuild, a crash, a stop — means
        the panel has gone dead and should come back. -->
   <key>KeepAlive</key>
   <true/>

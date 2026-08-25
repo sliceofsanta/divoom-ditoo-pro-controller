@@ -612,6 +612,22 @@ fn returned_since(prompt_file: &Path, since: std::time::SystemTime) -> bool {
     .unwrap_or(true)
 }
 
+/// What occupies the idle slot, if anything.
+///
+/// These face OUTWARD, at whoever is deciding whether to walk over, where the
+/// countdown faces inward at you. Ordered by how much an interruption costs:
+/// being IN a meeting beats a meeting that is merely coming, which beats
+/// heads-down. Returns None to leave the idle face alone.
+fn presence_face(in_meeting: bool, agenda_pending: bool, focus: bool) -> Option<&'static str> {
+  if in_meeting {
+    Some("meeting")
+  } else if !agenda_pending && focus {
+    Some("busy")
+  } else {
+    None
+  }
+}
+
 /// States that report how something ENDED, rather than what is happening now.
 ///
 /// The distinction decides what is allowed to go stale. "working" is a claim
@@ -953,11 +969,21 @@ pub async fn run_status_daemon(
   // Touched by the UserPromptSubmit hook: the only evidence the daemon has
   // that a human is actually at the keyboard.
   let prompt_file = state_file.with_file_name("last-prompt");
+  let meeting_file = state_file.with_file_name("meeting");
+  // Optional: hand the panel back to the device's own clock once it has been
+  // idle long enough to fall through to the screensaver. A clock is the one
+  // thing an animation cannot be -- it shows the actual time -- so an idle
+  // panel in the evening is more use telling you that than looping art.
+  //
+  // A file rather than an env var, like every other runtime input here, so it
+  // can be changed without restarting the daemon and losing the connection.
+  let clock_file = state_file.with_file_name("clock");
   let mut last_agenda: Option<u32> = None;
   // Wall-clock twin of `requested_since`. Needed because the question "has the
   // user typed since this verdict" compares against a file mtime, and monotonic
   // Instants cannot be compared to one.
   let mut requested_at_wall = std::time::SystemTime::now();
+  let mut last_clock: Option<u16> = None;
   let run_dir = state_file.parent().unwrap_or(faces_dir);
   let mut last_overlays = Overlays::default();
   // `requested` is what the hooks asked for; `displayed` is the face actually
@@ -1068,6 +1094,26 @@ pub async fn run_status_daemon(
         if agenda != last_agenda {
           displayed = None;
           last_agenda = agenda;
+        }
+
+        // Minutes left in a meeting already under way, written by the same
+        // helper. A separate file from the countdown because they answer
+        // different questions for different people -- see AgendaApp.swift.
+        let in_meeting = std::fs::read_to_string(&meeting_file)
+          .ok()
+          .and_then(|v| v.trim().parse::<u32>().ok())
+          .filter(|m| *m > 0);
+
+        // Read every tick and BEFORE the "nothing to redraw" exit below.
+        // Configuring a clock while the panel already sits on the screensaver
+        // is the whole point of it being a file, and reading it inside the
+        // branch meant that exact case did nothing at all.
+        let screensaver_clock = std::fs::read_to_string(&clock_file)
+          .ok()
+          .and_then(|v| v.trim().parse::<u16>().ok());
+        if screensaver_clock != last_clock {
+          displayed = None;
+          last_clock = screensaver_clock;
         }
 
         // Focus shortens the escalation ladder -- see focus_active().
@@ -1181,7 +1227,22 @@ pub async fn run_status_daemon(
 
         // Re-evaluated every tick, not just on change: escalation and decay
         // happen with the state file sitting still.
-        let face = present(&requested, now.duration_since(requested_since), &timings).to_string();
+        let mut face =
+          present(&requested, now.duration_since(requested_since), &timings).to_string();
+
+        // An idle panel is free real estate, and what goes there depends on who
+        // is being spoken to. A meeting and a Focus session face OUTWARD, at
+        // whoever is deciding whether to walk over; the countdown faces inward
+        // at you. Anything other than idle is already saying something, so none
+        // of these ever take the panel away from it.
+        //
+        // Ordered by how much it costs to interrupt: being IN a meeting beats a
+        // meeting that is merely coming, which beats heads-down.
+        if face == "chilling" {
+          if let Some(presence) = presence_face(in_meeting.is_some(), agenda.is_some(), focus) {
+            face = presence.to_string();
+          }
+        }
         if displayed.as_deref() == Some(face.as_str()) {
           // Nothing to redraw. Anything that must happen EVERY tick -- draining
           // the device's channel, noticing a context change -- has to run
@@ -1252,6 +1313,34 @@ pub async fn run_status_daemon(
                 info!("Applied countdown: {} minutes", minutes);
                 let _ = std::fs::write(&applied_file, format!("countdown-{}\n", minutes));
                 displayed = Some(face);
+              }
+            }
+            continue;
+          }
+        }
+
+        // The screensaver can be the device's built-in clock rather than an
+        // image. Sending any later animation takes the panel back, so this
+        // needs no special exit.
+        if face == "screensaver" {
+          if let Some(clock_id) = screensaver_clock {
+            let Some(active) = connection.as_mut() else { continue };
+            let packet = protocol::extended_command::build_packet(
+              protocol::extended_command::SET_USER_DEFINE_TIME,
+              &clock_id.to_le_bytes()
+            );
+            match active.fire_and_forget(&packet).await {
+              Ok(()) => {
+                info!("Idle: handed the panel to clock face {}", clock_id);
+                let _ = std::fs::write(&applied_file, format!("clock-{}\n", clock_id));
+                displayed = Some(face);
+              }
+              Err(e) => {
+                info!("Clock send failed ({}); dropping the connection", e);
+                if let Some(dead) = connection.take() {
+                  dead.disconnect().await.ok();
+                }
+                displayed = None;
               }
             }
             continue;
@@ -1649,6 +1738,29 @@ mod status_daemon_tests {
     // Every session dead means nothing to show at all.
     assert_eq!(merge_sessions(&[("alerting".into(), dead)]), None);
     assert_eq!(merge_sessions(&[]), None);
+  }
+
+  #[test]
+  fn presence_fills_the_idle_slot_without_ever_taking_it() {
+    // Being in one beats one that is coming, which beats heads-down.
+    assert_eq!(presence_face(true, true, true), Some("meeting"));
+    assert_eq!(presence_face(true, false, false), Some("meeting"));
+    assert_eq!(presence_face(false, true, true), None, "the countdown keeps the slot");
+    assert_eq!(presence_face(false, false, true), Some("busy"));
+    assert_eq!(presence_face(false, false, false), None);
+
+    // And the whole thing is gated on the panel being idle in the first place:
+    // a presence signal must never take the panel away from something that is
+    // actually saying something -- least of all an alert.
+    let timings = t();
+    for busy in ["working", "thinking", "alerting", "error", "compacting"] {
+      assert_eq!(
+        present(busy, Duration::ZERO, &timings),
+        busy,
+        "{:?} must still own the panel",
+        busy
+      );
+    }
   }
 
   #[test]
