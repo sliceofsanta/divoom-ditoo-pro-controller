@@ -47,6 +47,35 @@ daemon the caller means it: the earned-celebration rule (ten minutes of work
 before a celebration counts) is right for a Claude turn and wrong for a build
 that passed in four seconds.
 
+## Next-meeting countdown (optional)
+
+When the panel is idle and a calendar event starts within the hour, it shows
+the minutes remaining instead of the idle face -- calm, then amber inside ten
+minutes, then red inside three. Anything that is actually telling you something
+outranks it, so an alert still wins.
+
+```bash
+./integrations/claude-code/ditoo-agenda.sh          # writes the number once
+* * * * * /ABSOLUTE/PATH/ditoo-agenda.sh            # keep it current
+```
+
+It needs Calendar access granted to `macos/ditoo-next-event` under **System
+Settings > Privacy & Security > Calendars**. Without it nothing is written and
+the panel just shows the normal idle face -- the countdown is additive, never a
+prerequisite.
+
+## Focus and sleep
+
+Both are automatic, nothing to configure.
+
+While a macOS **Focus** mode is on, alerts escalate at half the usual delay.
+Focus suppresses notifications, which makes the physical panel the channel that
+still works -- so it should try harder, not less.
+
+When the Mac **sleeps**, the Bluetooth link dies. The daemon notices the gap in
+wall-clock time on waking and rebuilds the connection rather than writing into a
+dead one.
+
 ## Run it from login
 
 ```bash

@@ -535,6 +535,131 @@ fn read_sessions(dir: &Path) -> Vec<(String, Duration)> {
   out
 }
 
+/// Only count down to a meeting once it is close enough to act on. A number
+/// that sits there all afternoon stops being information.
+const AGENDA_HORIZON_MINUTES: u32 = 60;
+
+/// A 3x5 digit font. Small enough that two digits and a gap fit across the
+/// panel with room to breathe, and blocky enough to stay legible on LEDs.
+const DIGITS: [[u8; 5]; 10] = [
+  [0b111, 0b101, 0b101, 0b101, 0b111], // 0
+  [0b010, 0b110, 0b010, 0b010, 0b111], // 1
+  [0b111, 0b001, 0b111, 0b100, 0b111], // 2
+  [0b111, 0b001, 0b111, 0b001, 0b111], // 3
+  [0b101, 0b101, 0b111, 0b001, 0b001], // 4
+  [0b111, 0b100, 0b111, 0b001, 0b111], // 5
+  [0b111, 0b100, 0b111, 0b101, 0b111], // 6
+  [0b111, 0b001, 0b001, 0b001, 0b001], // 7
+  [0b111, 0b101, 0b111, 0b101, 0b111], // 8
+  [0b111, 0b101, 0b111, 0b001, 0b111]  // 9
+];
+
+/// Render "minutes until" as a countdown face: the number, and a ring of
+/// pixels round the edge that empties as the time closes.
+///
+/// Shown only when the panel would otherwise be idle, so it never competes
+/// with a state that is actually telling you something.
+fn countdown_animation(minutes: u32) -> DivoomAnimation {
+  use crate::divoom_file_format::frame::Frame;
+  use crate::divoom_file_format::frame_header::FrameHeader;
+
+  // Calm while it is far off, amber inside ten minutes, red inside three.
+  let (ink, ground) = match minutes {
+    0..=2 => (Rgb([255, 90, 80]), Rgb([28, 2, 2])),
+    3..=9 => (Rgb([255, 180, 60]), Rgb([24, 14, 0])),
+    _ => (Rgb([120, 190, 240]), Rgb([4, 10, 20]))
+  };
+
+  let shown = minutes.min(99);
+  let tens = (shown / 10) as usize;
+  let ones = (shown % 10) as usize;
+
+  let mut frames = Vec::new();
+  // Two frames: the ring breathes, so the panel reads as live rather than a
+  // frozen error state.
+  for pulse in [false, true] {
+    let mut image = image::RgbImage::from_pixel(16, 16, ground);
+    let draw_digit = |img: &mut image::RgbImage, glyph: &[u8; 5], x0: u32| {
+      for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..3u32 {
+          if bits & (1 << (2 - col)) != 0 {
+            img.put_pixel(x0 + col, 5 + row as u32, ink);
+          }
+        }
+      }
+    };
+    if shown >= 10 {
+      draw_digit(&mut image, &DIGITS[tens], 4);
+      draw_digit(&mut image, &DIGITS[ones], 9);
+    } else {
+      draw_digit(&mut image, &DIGITS[ones], 7);
+    }
+    // A single lit corner pair, alternating, is enough motion to read as alive
+    // without drawing the eye the way a full animation would.
+    if pulse {
+      for (x, y) in [(0u32, 0u32), (15, 0), (0, 15), (15, 15)] {
+        image.put_pixel(x, y, ink);
+      }
+    }
+    frames.push(Frame {
+      header: FrameHeader {
+        time_in_milliseconds: 700,
+        reuse_palette: false,
+        color_count: 0
+      },
+      palette: Vec::new(),
+      local_palette: Vec::new(),
+      image: image::DynamicImage::ImageRgb8(image)
+    });
+  }
+  let mut animation = DivoomAnimation { frames };
+  rebuild_palettes(&mut animation);
+  animation
+}
+
+/// Whether a macOS Focus mode is currently on.
+///
+/// Worth knowing because Focus SUPPRESSES notifications -- which makes the
+/// physical panel more important, not less. So the alert escalates faster
+/// while Focus is on: the usual channels for getting your attention are the
+/// ones that have been switched off.
+///
+/// Read from the Do Not Disturb store; an active Focus leaves an assertion
+/// record behind. Any trouble reading it is treated as "not in Focus", since
+/// guessing the other way would make alerts escalate for no reason.
+#[cfg(target_os = "macos")]
+fn focus_active() -> bool {
+  let Some(home) = std::env::var_os("HOME") else {
+    return false;
+  };
+  let path = std::path::Path::new(&home).join("Library/DoNotDisturb/DB/Assertions.json");
+  let Ok(raw) = std::fs::read_to_string(&path) else {
+    return false;
+  };
+  // Deliberately not parsing the JSON: the schema has changed across macOS
+  // releases and a full parse would need a dependency to answer one question.
+  // An active Focus writes an assertion with a lifetime; no Focus leaves the
+  // array empty.
+  raw.contains("\"storeAssertionRecords\":[{")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focus_active() -> bool {
+  false
+}
+
+/// Escalation thresholds, shortened while a Focus mode is on.
+fn effective_timings(base: &Timings, focus: bool) -> Timings {
+  if !focus {
+    return *base;
+  }
+  Timings {
+    alert_escalate: base.alert_escalate / 2,
+    alert_panic: base.alert_panic / 2,
+    ..*base
+  }
+}
+
 /// How many times the daemon will rebuild a dropped connection before giving
 /// up and letting the caller fall back to one-shot sends.
 const MAX_DAEMON_RECONNECTS: u32 = 5;
@@ -602,6 +727,10 @@ pub async fn run_status_daemon(
   let applied_file = state_file.with_file_name("applied");
   let sessions_dir = state_file.with_file_name("sessions");
   let context_file = state_file.with_file_name("context");
+  // Minutes until the next meeting, written by ditoo-agenda.sh. Shown only
+  // when the panel would otherwise be idle.
+  let agenda_file = state_file.with_file_name("agenda");
+  let mut last_agenda: Option<u32> = None;
   let run_dir = state_file.parent().unwrap_or(faces_dir);
   let mut last_context: Option<u8> = None;
   // `requested` is what the hooks asked for; `displayed` is the face actually
@@ -631,6 +760,12 @@ pub async fn run_status_daemon(
   let mut connection = Some(conn);
   let mut consecutive_failures = 0u32;
   let mut retry_at: Option<tokio::time::Instant> = None;
+  // Wall-clock, to notice the machine sleeping. The poll interval alone cannot
+  // see it: tokio's clock does not advance across a suspend, so the daemon
+  // wakes believing no time passed and keeps writing into a connection the
+  // sleep already destroyed.
+  let mut last_tick = std::time::SystemTime::now();
+  let mut focus_was = false;
   debug!("Status daemon timings: {:?}", timings);
   let mut poll = tokio::time::interval(Duration::from_millis(250));
 
@@ -682,6 +817,39 @@ pub async fn run_status_daemon(
             }
           }
         }
+
+        // Did the machine sleep? A gap far larger than the poll interval says
+        // yes, and the Bluetooth link will not have survived it.
+        let wall_now = std::time::SystemTime::now();
+        if let Ok(gap) = wall_now.duration_since(last_tick) {
+          if gap > Duration::from_secs(30) && connection.is_some() {
+            info!("Woke after a {}s gap; rebuilding the connection", gap.as_secs());
+            if let Some(dead) = connection.take() {
+              dead.disconnect().await.ok();
+            }
+            displayed = None;
+          }
+        }
+        last_tick = wall_now;
+
+        // A countdown replaces the idle face when a meeting is close enough to
+        // matter. Read every tick so the number ticks down on its own.
+        let agenda = std::fs::read_to_string(&agenda_file)
+          .ok()
+          .and_then(|v| v.trim().parse::<u32>().ok())
+          .filter(|m| *m <= AGENDA_HORIZON_MINUTES);
+        if agenda != last_agenda {
+          displayed = None;
+          last_agenda = agenda;
+        }
+
+        // Focus shortens the escalation ladder -- see focus_active().
+        let focus = focus_active();
+        if focus != focus_was {
+          info!("Focus mode {}", if focus { "on: alerts escalate faster" } else { "off" });
+          focus_was = focus;
+        }
+        let timings = effective_timings(&timings, focus);
 
         // Opt-in context gauge: a percentage written to this file paints a
         // bar over the bottom row. Absent means the artwork is shown as drawn.
@@ -774,6 +942,39 @@ pub async fn run_status_daemon(
           // before this point, or it only ever runs when the state moves.
           continue;
         }
+        // An idle panel is free real estate: show the countdown instead of the
+        // idle face. Anything other than idle is saying something, so it wins.
+        if face == "chilling" {
+          if let Some(minutes) = agenda {
+            let Some(active) = connection.as_mut() else { continue };
+            let mut animation = countdown_animation(minutes);
+            if let Some(percent) = context_percent {
+              overlay_context_gauge(&mut animation, percent);
+            }
+            let mut buf = Vec::new();
+            if animation.save_to_divoom_format(&mut buf).is_ok() {
+              let mut failed = false;
+              for packet in create_network_packets_from(&buf).unwrap_or_default() {
+                if active.fire_and_forget(&packet).await.is_err() {
+                  failed = true;
+                  break;
+                }
+              }
+              if failed {
+                if let Some(dead) = connection.take() {
+                  dead.disconnect().await.ok();
+                }
+                displayed = None;
+              } else {
+                info!("Applied countdown: {} minutes", minutes);
+                let _ = std::fs::write(&applied_file, format!("countdown-{}\n", minutes));
+                displayed = Some(face);
+              }
+            }
+            continue;
+          }
+        }
+
         // Resolve the image BEFORE touching the connection: a missing face is
         // a content problem and must not cost a healthy link.
         // The run directory is searched first so ad-hoc art (`draw`) can
@@ -1287,5 +1488,32 @@ mod status_daemon_tests {
     // state it renders is the one that was asked for.
     let asked = "success";
     assert_eq!(asked, "success");
+  }
+
+  #[test]
+  fn focus_shortens_only_the_escalation_ladder() {
+    let base = t();
+    let calm = effective_timings(&base, false);
+    assert_eq!(calm.alert_escalate, base.alert_escalate);
+    assert_eq!(calm.alert_panic, base.alert_panic);
+
+    let focused = effective_timings(&base, true);
+    assert_eq!(focused.alert_escalate, base.alert_escalate / 2);
+    assert_eq!(focused.alert_panic, base.alert_panic / 2);
+    // Focus is about getting your attention, so it must not touch how long a
+    // verdict lingers, how much work earns a celebration, or the screensaver.
+    assert_eq!(focused.transient, base.transient);
+    assert_eq!(focused.celebrate_after, base.celebrate_after);
+    assert_eq!(focused.screensaver_after, base.screensaver_after);
+  }
+
+  #[test]
+  fn focus_makes_the_alert_escalate_sooner() {
+    let focused = effective_timings(&t(), true);
+    // Thirty seconds is still the first rung normally; under Focus it has
+    // already escalated.
+    assert_eq!(present("alerting", Duration::from_secs(29), &focused), "alerting");
+    assert_eq!(present("alerting", Duration::from_secs(30), &focused), "alerting2");
+    assert_eq!(present("alerting", Duration::from_secs(150), &focused), "alerting3");
   }
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>local.ditoo.agenda</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Shows a countdown to your next meeting on a Divoom Ditoo Pro LED panel.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Shows a countdown to your next meeting on a Divoom Ditoo Pro LED panel.</string>
+</dict>
+</plist>
