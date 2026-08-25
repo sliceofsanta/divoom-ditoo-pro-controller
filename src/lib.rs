@@ -7,8 +7,9 @@ use std::time::Duration;
 use std::thread;
 
 use chrono::{NaiveDateTime, NaiveTime};
+use image::{DynamicImage, Rgb};
 #[cfg(feature = "video")]
-use image::{DynamicImage, Rgb, RgbImage};
+use image::RgbImage;
 #[cfg(feature = "video")]
 use indexmap::IndexSet;
 use log::{debug, info};
@@ -414,6 +415,58 @@ impl Timings {
   }
 }
 
+/// Paint a context-usage bar along the bottom row of every frame.
+///
+/// This composites over the artwork, so it is opt-in: the faces are drawn by
+/// hand and overwriting a row of them is a decision the owner should make, not
+/// a default. Enabled by writing a percentage to the `context` file.
+///
+/// The bar reads left-to-right and warms as it fills, so a glance says both
+/// "how full" and "how worried" without needing to resolve individual pixels.
+fn overlay_context_gauge(animation: &mut DivoomAnimation, percent: u8) {
+  let percent = percent.min(100);
+  let lit = (16 * percent as u32).div_ceil(100);
+  if lit == 0 {
+    return;
+  }
+  // Green until it matters, amber past half, red when a compact is imminent.
+  let colour = match percent {
+    0..=59 => Rgb([40, 190, 120]),
+    60..=84 => Rgb([240, 175, 60]),
+    _ => Rgb([255, 70, 70])
+  };
+  for frame in &mut animation.frames {
+    // to_rgb8() rather than as_mut_rgb8(): frames decoded from a GIF are
+    // RGBA8, so asking for RGB8 in place yields None and the overlay silently
+    // does nothing -- which then leaves the rebuilt palette empty and the
+    // encode fails with "Pixel not found in palette".
+    let mut image = frame.image.to_rgb8();
+    for x in 0..lit.min(16) {
+      image.put_pixel(x, 15, colour);
+    }
+    frame.image = DynamicImage::ImageRgb8(image);
+    frame.header.reuse_palette = false;
+  }
+  rebuild_palettes(animation);
+}
+
+/// Recompute each frame's palette from its pixels. Needed after compositing,
+/// since `save_to_divoom_format` looks colours up in the palette and errors on
+/// any pixel it cannot find.
+fn rebuild_palettes(animation: &mut DivoomAnimation) {
+  for frame in &mut animation.frames {
+    let mut palette: Vec<Rgb<u8>> = Vec::new();
+    for pixel in frame.image.to_rgb8().pixels() {
+      if !palette.contains(pixel) {
+        palette.push(*pixel);
+      }
+    }
+    frame.header.color_count = palette.len() as u8;
+    frame.local_palette = palette.clone();
+    frame.palette = palette;
+  }
+}
+
 /// A session whose state file has not been touched in this long is treated as
 /// gone. Without this a crashed session would pin the panel to "working"
 /// forever, and the display would be lying about work nobody is doing.
@@ -536,6 +589,8 @@ pub async fn run_status_daemon(
 
   let applied_file = state_file.with_file_name("applied");
   let sessions_dir = state_file.with_file_name("sessions");
+  let context_file = state_file.with_file_name("context");
+  let mut last_context: Option<u8> = None;
   // `requested` is what the hooks asked for; `displayed` is the face actually
   // on the panel. They differ whenever a state is being presented over time --
   // an alert that has escalated, or a verdict that has decayed to idle.
@@ -662,6 +717,18 @@ pub async fn run_status_daemon(
         if displayed.as_deref() == Some(face.as_str()) {
           continue;
         }
+        // Opt-in context gauge: a percentage written to this file paints a
+        // bar over the bottom row. Absent means the artwork is shown as drawn.
+        let context_percent = std::fs::read_to_string(&context_file)
+          .ok()
+          .and_then(|v| v.trim().parse::<u8>().ok());
+        if context_percent != last_context {
+          // The bar changed, so the panel has to be redrawn even if the state
+          // has not moved.
+          displayed = None;
+          last_context = context_percent;
+        }
+
         // Drain anything the device sent us. Nothing else consumes this
         // channel in daemon mode, so skipping it leaks for the daemon's whole
         // lifetime. It is also the only chance to observe the device's
@@ -688,7 +755,7 @@ pub async fn run_status_daemon(
         let Some(active) = connection.as_mut() else {
           continue;
         };
-        match send_state(active, &path).await {
+        match send_state(active, &path, context_percent).await {
           Ok(()) => {
             info!("Applied state {}", face);
             consecutive_failures = 0;
@@ -740,13 +807,18 @@ fn face_path(faces_dir: &Path, state: &str) -> Option<std::path::PathBuf> {
 
 async fn send_state(
   conn: &mut DeviceConnection,
-  path: &Path
+  path: &Path,
+  context_percent: Option<u8>
 ) -> Result<(), Box<dyn Error>> {
   let animation = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif")) {
     DivoomAnimation::from_gif(&mut BufReader::new(File::open(path)?))?
   } else {
     DivoomAnimation::from_image(image::open(path)?)?
   };
+  let mut animation = animation;
+  if let Some(percent) = context_percent {
+    overlay_context_gauge(&mut animation, percent);
+  }
   let mut buf = Vec::new();
   animation.save_to_divoom_format(&mut buf)?;
   for packet in create_network_packets_from(&buf)? {
@@ -889,6 +961,7 @@ pub async fn send_video(
 #[cfg(test)]
 mod status_daemon_tests {
   #![allow(clippy::unwrap_used)]
+  #![allow(clippy::expect_used)]
 
   use super::*;
 
@@ -1057,5 +1130,94 @@ mod status_daemon_tests {
     // Every session dead means nothing to show at all.
     assert_eq!(merge_sessions(&[("alerting".into(), dead)]), None);
     assert_eq!(merge_sessions(&[]), None);
+  }
+
+  #[test]
+  fn the_gauge_fills_left_to_right_and_warns_as_it_goes() {
+    use crate::divoom_file_format::frame::Frame;
+    use crate::divoom_file_format::frame_header::FrameHeader;
+    use image::{DynamicImage, RgbImage};
+
+    let build = |percent: u8| {
+      let image = RgbImage::from_pixel(16, 16, Rgb([0, 0, 0]));
+      let mut animation = DivoomAnimation {
+        frames: vec![Frame {
+          header: FrameHeader {
+            time_in_milliseconds: 100,
+            reuse_palette: false,
+            color_count: 1
+          },
+          palette: vec![Rgb([0, 0, 0])],
+          local_palette: vec![Rgb([0, 0, 0])],
+          image: DynamicImage::ImageRgb8(image)
+        }]
+      };
+      overlay_context_gauge(&mut animation, percent);
+      animation
+    };
+
+    // Empty draws nothing at all -- the artwork is untouched.
+    let empty = build(0);
+    let img = empty.frames[0].image.as_rgb8().unwrap();
+    assert_eq!(*img.get_pixel(0, 15), Rgb([0, 0, 0]));
+
+    // Half fills half the row, from the left.
+    let half = build(50);
+    let img = half.frames[0].image.as_rgb8().unwrap();
+    let lit = (0..16).filter(|x| *img.get_pixel(*x, 15) != Rgb([0, 0, 0])).count();
+    assert_eq!(lit, 8);
+    assert_ne!(*img.get_pixel(0, 15), Rgb([0, 0, 0]), "fills from the left");
+    assert_eq!(*img.get_pixel(15, 15), Rgb([0, 0, 0]));
+
+    // Full fills the row and only the row.
+    let full = build(100);
+    let img = full.frames[0].image.as_rgb8().unwrap();
+    assert!((0..16).all(|x| *img.get_pixel(x, 15) != Rgb([0, 0, 0])));
+    assert!((0..16).all(|x| *img.get_pixel(x, 14) == Rgb([0, 0, 0])),
+            "only the bottom row is overwritten");
+
+    // Colour escalates with pressure.
+    let calm = *build(20).frames[0].image.as_rgb8().unwrap().get_pixel(0, 15);
+    let warn = *build(70).frames[0].image.as_rgb8().unwrap().get_pixel(0, 15);
+    let alarm = *build(95).frames[0].image.as_rgb8().unwrap().get_pixel(0, 15);
+    assert_ne!(calm, warn);
+    assert_ne!(warn, alarm);
+    assert!(alarm[0] > alarm[1], "near-full reads red");
+
+    // The palette must be rebuilt or save_to_divoom_format cannot find the
+    // new colours and the whole send fails.
+    let mut buf = Vec::new();
+    build(50).save_to_divoom_format(&mut buf).expect("composited frame must still encode");
+    assert!(!buf.is_empty());
+  }
+
+  #[test]
+  fn the_gauge_survives_a_real_gif_frame() {
+    // The synthetic test above builds an RGB8 image directly, which is not
+    // what the daemon ever sees: frames decoded from a GIF are RGBA8. Compose
+    // over a real face and require that it still encodes.
+    let face = std::path::Path::new("integrations/claude-code/faces/chilling.gif");
+    if !face.exists() {
+      return; // faces are user-supplied; skip rather than fail the suite
+    }
+    let mut animation = DivoomAnimation::from_gif(
+      &mut BufReader::new(File::open(face).unwrap())
+    ).unwrap();
+    let before = animation.frames.len();
+    overlay_context_gauge(&mut animation, 50);
+    assert_eq!(animation.frames.len(), before, "frame count is preserved");
+
+    let painted = animation.frames[0].image.to_rgb8();
+    let lit = (0..16).filter(|x| {
+      let p = painted.get_pixel(*x, 15);
+      p[0] as u16 + p[1] as u16 + p[2] as u16 > 120
+    }).count();
+    assert!(lit >= 6, "half a gauge should light about half the row, got {}", lit);
+
+    let mut buf = Vec::new();
+    animation
+      .save_to_divoom_format(&mut buf)
+      .expect("a composited GIF frame must still encode");
+    assert!(!buf.is_empty());
   }
 }

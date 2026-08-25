@@ -1,32 +1,56 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into a tiny **Super Mario progress world** for
-[Claude Code](https://claude.com/claude-code). Mario is the on-screen player,
-zoomed out to five pixels wide so the majority of every frame can show a
-recognisable level: blue skies, orange bricks, question blocks, coins, green
-pipes, Goombas, flagpoles, lava, castles and Bowser's boss arena.
+Turn a Divoom Ditoo Pro into a tiny **Pac-Man progress board** for
+[Claude Code](https://claude.com/claude-code). Every state keeps the complete
+16x16 neon maze visible: Pac-Man and the ghosts remain tiny pieces moving inside
+the grid instead of becoming zoomed-in character portraits.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | **WORLD MAP:** stays still, reads the map and considers two routes |
-| `working` | Claude runs a tool | **WORLD 1-1:** Mario runs, jumps, bonks a question block and releases a coin |
-| `compacting` | Claude compacts context | **WARP CLEANUP:** loose context blocks spiral into a green pipe |
-| `alerting` | Claude needs your input | **PLAYER NEEDED:** Mario waves at a locked brick castle and floating key |
-| `alerting2` | still waiting after 1 minute | the same castle flashes faster while lava rises |
-| `alerting3` | still waiting after 5 minutes | **BOWSER ALERT:** giant castle boss, stolen key and full-screen strobe |
-| `success` | Claude finished responding | **COURSE CLEAR:** Mario grabs the flagpole while fireworks burst |
-| `error` | a tool or the turn failed | **BONK:** a Goomba hits Mario and knocks off his cap |
-| `chilling` | a session starts, or manual | **1-UP REST STOP:** Mario naps beside a green pipe and mushroom under the moon |
+| `thinking` | you submit a prompt | **READY:** Pac-Man stays still at a fork while the two routes pulse |
+| `working` | Claude runs a tool | **CHOMP RUN:** traverses the grid continuously, clearing pellets behind him |
+| `compacting` | Claude compacts context | **BOARD CLEANUP:** clears a shrinking pellet ring into one power pellet |
+| `alerting` | Claude needs your input | **HEY:** one ghost approaches, power pellet and exclamation pulse slowly |
+| `alerting2` | still waiting after 1 minute | **STILL WAITING:** two ghosts close in while the maze flashes faster |
+| `alerting3` | still waiting after 5 minutes | **CORNERED:** four ghosts surround Pac-Man under a full-maze strobe |
+| `success` | Claude finished responding | **BOARD CLEAR:** frightened ghosts flee under a cherry bonus shower |
+| `error` | a tool or the turn failed | **CAUGHT:** ghost collision followed by Pac-Man's death burst |
+| `chilling` | a session starts, or manual | **ATTRACT MODE:** untouched pellet grid, sleeping Pac-Man, ghosts resting at home |
 | `off` | the session ends, or manual | blank display |
 
-Mario is an original five-wide sprite drawn directly on the grid: red cap,
-warm face, black hair and moustache, red shirt, blue overalls and brown boots.
-It is intentionally smaller than the earlier Claude mascot so each animation
-reads as a complete Super Mario level rather than a close-up character portrait.
+The board uses one-pixel blue maze walls, cream pellets, large power pellets and
+three-wide characters. State meaning comes from board state and choreography:
+stationary versus clearing, one ghost versus four, full pellets versus an empty
+board, normal ghosts versus frightened blue ghosts, and calm blue walls versus
+red/white escalation flashes.
 
 The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
 from a status light into a tiny desk companion.
+
+## Context fuel gauge (optional)
+
+Claude Code can forward how full the context window is, and the daemon paints
+it as a bar along the bottom row of whatever face is showing -- green, amber
+past half, red when a compact is close. A glance tells you how much room is
+left.
+
+It is **off by default and composites over your artwork**, so it is your call:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "/ABSOLUTE/PATH/integrations/claude-code/ditoo-context.sh"
+}
+```
+
+Delete `~/.claude/ditoo/context` (or remove the statusLine entry) and the
+faces render exactly as drawn again. To try it without wiring anything up:
+
+```bash
+echo 75 > ~/.claude/ditoo/context     # bar appears
+rm ~/.claude/ditoo/context            # artwork restored
+```
 
 ## Replacing the animations
 
@@ -235,11 +259,10 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 fallback if no GIF exists. `alerting2` and `alerting3` are the automatic
 one-minute and five-minute escalations used by the daemon.
 
-To edit the bundled ones, change the level scenes in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The compact
-`mario()` sprite is in the same file: `x` and `y` place him, `jump` lifts him,
-`step` selects a running-foot pair, and `pose` chooses standing, reading,
-waving, flag-grabbing or sleeping arms:
+To edit the bundled ones, change the board scenes in
+[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The same file
+contains the reusable `pac_maze()`, `pacman()`, `ghost()`, `pac_pellets()`,
+`power_pellet()` and `cherry()` drawing primitives:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -255,10 +278,9 @@ props and sparks deliberately run on different beats. And every jump uses a
 short launch plus a held apex; evenly spaced positions look like teleportation
 at this scale.
 
-The older Claude portrait rig remains in `mascot.py` as a reusable drawing
-primitive, but none of these nine animations uses it. The Mario sprite and
-level art are drawn from scratch rather than copied from a Nintendo sprite
-sheet.
+The older Claude and Mario drawing experiments remain as reusable legacy
+helpers, but none of these nine animations uses them. The Pac-Man grid and
+characters are drawn from scratch rather than copied from an arcade ROM.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you

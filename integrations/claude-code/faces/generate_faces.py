@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Generate a tiny Super Mario status world for the Ditoo Pro.
+"""Generate a full-board Pac-Man status arcade for the Ditoo Pro.
 
 Every Claude Code state is another scene in the same miniature platformer:
 
-    thinking    Mario studies a level map without moving
-    working     Mario runs through bricks, coins and a warp pipe
-    alerting    a castle door waits for the player's key
-    compacting  loose code blocks disappear into a warp pipe
-    success     Mario grabs the flagpole under fireworks
-    error       a Goomba bonks Mario and knocks off his cap
-    chilling    Mario naps on a warp pipe beside a mushroom
+    thinking    Pac-Man waits at a fork while two routes pulse
+    working     Pac-Man traverses the maze, clearing pellets
+    alerting    ghosts approach through increasingly urgent warnings
+    compacting  a shrinking pellet ring clears into one power pellet
+    success     the board is clear; frightened ghosts flee under cherries
+    error       a ghost collision triggers Pac-Man's death burst
+    chilling    the full maze rests with Pac-Man asleep and ghosts at home
 
-Mario is only five pixels wide, leaving most of the panel for recognisable
-level geometry: sky, bricks, question blocks, pipes, enemies and castles.
+The camera never cuts in. Every frame keeps the entire neon maze visible, with
+three-wide characters moving inside it rather than becoming close-up portraits.
 
 Stdlib only (see gifwriter.py for the encoder), so this runs anywhere without
 pip installs.
@@ -71,6 +71,16 @@ TURTLE = (91, 190, 74)
 MARIO_SKIN = (255, 187, 112)
 MARIO_HAIR = (79, 37, 22)
 MARIO_BOOT = (96, 43, 27)
+PAC_YELLOW = (255, 226, 32)
+PAC_WALL = (28, 67, 255)
+PAC_WALL_LIGHT = (80, 170, 255)
+PAC_PELLET = (255, 190, 156)
+GHOST_RED = (255, 45, 45)
+GHOST_PINK = (255, 130, 190)
+GHOST_CYAN = (45, 225, 235)
+GHOST_ORANGE = (255, 165, 55)
+GHOST_FRIGHT = (45, 75, 230)
+CHERRY_RED = (238, 40, 55)
 
 
 def pixels(grid, points, colour):
@@ -202,6 +212,93 @@ def mushroom(grid, x, y, colour=CAP_RED):
   pixels(grid, ((x + 1, y + 1), (x + 3, y + 1)), CREAM)
 
 
+# --- Pac-Man board --------------------------------------------------------
+
+PAC_DOTS = (
+  (1, 1), (3, 1), (5, 1), (7, 1), (9, 1), (11, 1), (13, 1),
+  (1, 5), (3, 5), (5, 5), (10, 5), (12, 5), (14, 5),
+  (1, 7), (4, 7), (11, 7), (14, 7),
+  (1, 10), (3, 10), (5, 10), (10, 10), (12, 10), (14, 10),
+  (1, 14), (3, 14), (5, 14), (7, 14), (9, 14), (11, 14), (13, 14),
+)
+
+
+def pac_maze(grid, wall=PAC_WALL, gate=GHOST_PINK):
+  """Draw a complete, zoomed-out neon maze with side tunnels and ghost house."""
+  # Outer loop, with the two classic tunnel openings at mid-height.
+  mascot.rect(grid, 0, 0, 15, 0, wall)
+  mascot.rect(grid, 0, 15, 15, 15, wall)
+  mascot.rect(grid, 0, 0, 0, 5, wall)
+  mascot.rect(grid, 0, 10, 0, 15, wall)
+  mascot.rect(grid, 15, 0, 15, 5, wall)
+  mascot.rect(grid, 15, 10, 15, 15, wall)
+
+  # Four maze islands leave three-pixel corridors for the tiny characters.
+  mascot.rect(grid, 2, 3, 5, 4, wall)
+  mascot.rect(grid, 10, 3, 13, 4, wall)
+  mascot.rect(grid, 2, 11, 5, 12, wall)
+  mascot.rect(grid, 10, 11, 13, 12, wall)
+  pixels(grid, ((2, 2), (5, 2), (10, 2), (13, 2),
+                (2, 13), (5, 13), (10, 13), (13, 13)), PAC_WALL_LIGHT if wall == PAC_WALL else wall)
+
+  # Central ghost house, including a contrasting gate.
+  mascot.rect(grid, 6, 6, 9, 6, wall)
+  mascot.rect(grid, 6, 6, 6, 9, wall)
+  mascot.rect(grid, 9, 6, 9, 9, wall)
+  mascot.rect(grid, 6, 9, 9, 9, wall)
+  mascot.rect(grid, 7, 6, 8, 6, gate)
+
+
+def pac_pellets(grid, hidden=(), colour=PAC_PELLET):
+  hidden = set(hidden)
+  for point in PAC_DOTS:
+    if point not in hidden:
+      mascot.px(grid, point[0], point[1], colour)
+
+
+def power_pellet(grid, x, y, bright=True):
+  colour = CREAM if bright else PAC_PELLET
+  mascot.rect(grid, x, y, x + 1, y + 1, colour)
+
+
+def pacman(grid, x, y, direction="right", mouth=True):
+  """Three-wide Pac-Man; the missing edge pixel is the animated mouth."""
+  points = {(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1),
+            (0, 2), (1, 2), (2, 2)}
+  if mouth:
+    missing = {
+      "right": {(2, 1)}, "left": {(0, 1)},
+      "up": {(1, 0)}, "down": {(1, 2)},
+    }.get(direction, {(2, 1)})
+    points -= missing
+  # Clip the square's corners into a rounder silhouette.
+  points -= {(0, 0), (2, 2)} if direction in ("right", "down") else {(2, 0), (0, 2)}
+  for px_x, px_y in points:
+    mascot.px(grid, x + px_x, y + px_y, PAC_YELLOW)
+  eye_x = 1 if direction != "left" else 0
+  mascot.px(grid, x + eye_x, y, INK)
+
+
+def ghost(grid, x, y, colour, look=-1, blink=False, eyes_only=False):
+  """Three-wide ghost with domed head, two eyes and a split skirt."""
+  if not eyes_only:
+    pixels(grid, ((x + 1, y), (x, y + 1), (x + 1, y + 1), (x + 2, y + 1),
+                  (x, y + 2), (x + 1, y + 2), (x + 2, y + 2),
+                  (x, y + 3), (x + 2, y + 3)), colour)
+  if blink:
+    pixels(grid, ((x, y + 1), (x + 2, y + 1)), INK)
+  else:
+    pixels(grid, ((x, y + 1), (x + 2, y + 1)), CREAM)
+    pupil_shift = 1 if look > 0 else 0
+    pixels(grid, ((x + pupil_shift, y + 2), (x + 2, y + 2)), PAC_WALL)
+
+
+def cherry(grid, x, y):
+  pixels(grid, ((x, y + 2), (x + 1, y + 1), (x + 3, y + 2),
+                (x + 1, y + 3), (x + 3, y + 3)), CHERRY_RED)
+  pixels(grid, ((x + 1, y), (x + 2, y), (x + 2, y + 1)), PIPE)
+
+
 def heart(grid, x, y, colour=HOT, broken=False):
   if broken:
     pixels(grid, ((x, y), (x + 2, y), (x, y + 1), (x + 2, y + 1)), colour)
@@ -260,241 +357,180 @@ def gate(grid, glow=False):
 
 
 def thinking_frames():
-  """WORLD MAP: Mario stays put and quietly studies two routes."""
+  """READY: Pac-Man waits at a fork while the two routes pulse."""
   frames = []
-  for i in range(10):
-    grid = mascot.blank(BG_THINK)
-    clouds(grid, shift=0)
-    ground(grid, offset=0)
-
-    # The map is smaller than before, widening the shot enough to see Mario,
-    # sky, clouds and brick floor as one complete overworld scene.
-    mascot.rect(grid, 7, 3, 13, 11, MARIO_HAIR)
-    mascot.rect(grid, 6, 3, 12, 10, CREAM)
-    mascot.rect(grid, 7, 3, 13, 4, AMBER)
-    mascot.rect(grid, 6, 9, 12, 10, AMBER)
-    pixels(grid, ((7, 8), (8, 8), (8, 7), (9, 7), (9, 6), (10, 6)), CODE)
-    pixels(grid, ((11, 5), (11, 7)), CODE_DARK)
-    if i % 4 < 2:
-      pixels(grid, ((11, 5), (12, 4), (12, 5)), PIPE)
-      mascot.px(grid, 11, 7, CODE_DARK)
-    else:
-      pixels(grid, ((11, 7), (12, 7), (12, 8)), CAP_RED)
-      mascot.px(grid, 11, 5, CODE_DARK)
-
-    # Thought bubbles rise from the mascot toward a tiny question glyph.
-    mascot.px(grid, 5, 5, CODE_DARK)
-    pixels(grid, ((13, 0), (14, 0), (15, 1), (14, 2), (14, 3)), CODE_LIGHT)
-
-    mario(grid, 0, 6, pose="read")
+  for i in range(8):
+    grid = mascot.blank(INK)
+    pac_maze(grid)
+    pac_pellets(grid)
+    power_pellet(grid, 1, 1, bright=i % 4 < 2)
+    power_pellet(grid, 13, 1, bright=i % 4 >= 2)
+    direction = "left" if i % 4 < 2 else "right"
+    pacman(grid, 6, 1, direction=direction, mouth=i % 2 == 0)
     frames.append(grid)
-  return frames, [220, 220, 220, 260, 220, 220, 110, 260, 220, 280]
+  return frames, [240, 180, 240, 300, 240, 180, 240, 320]
 
 
 def chilling_frames():
-  """1-UP REST STOP: Mario naps beside a green pipe and mushroom."""
-  stars = ((1, 1), (5, 2), (9, 0), (14, 3))
+  """ATTRACT MODE: full board, sleeping Pac-Man, ghosts resting at home."""
   frames = []
   for i in range(12):
-    grid = mascot.blank(BG_CHILL)
-    ground(grid, offset=0)
-    clouds(grid, shift=i // 3, night=True)
-    for number, (x, y) in enumerate(stars):
-      mascot.px(grid, x, y, CREAM if (i + number * 2) % 6 == 0 else CODE_DARK)
-
-    # Crescent moon and a floating Z make this the attract/save screen, not a
-    # generic idle pose.
-    pixels(grid, ((13, 0), (14, 0), (12, 1), (13, 2), (14, 2)), CREAM)
+    grid = mascot.blank(INK)
+    pac_maze(grid, wall=PAC_WALL_LIGHT if i in (5, 11) else PAC_WALL)
+    pac_pellets(grid)
+    pacman(grid, 1, 11, direction="right", mouth=False)
+    # Two pairs of eyes blink inside the ghost house without leaving it.
+    ghost(grid, 6, 6, GHOST_PINK, blink=i in (4, 5), eyes_only=True)
+    ghost(grid, 7, 6, GHOST_CYAN, blink=i in (9, 10), eyes_only=True)
     if i % 6 < 4:
-      z_y = 4 - i % 4
-      pixels(grid, ((5, z_y), (6, z_y), (6, z_y + 1), (5, z_y + 2), (6, z_y + 2)), CODE_LIGHT)
-
-    pipe(grid, 9, 8, height=4)
-    mushroom(grid, 11, 3 + (i // 3) % 2, CAP_RED if i % 4 else CREAM)
-
-    mario(grid, 0, 6, pose="sleep")
+      z_y = 10 - i % 4
+      pixels(grid, ((4, z_y), (5, z_y), (5, z_y + 1),
+                    (4, z_y + 2), (5, z_y + 2)), GHOST_CYAN)
+    cherry(grid, 11, 6)
     frames.append(grid)
   return frames, [240] * 12
 
 
 def working_frames():
-  """WORLD 1-1: Mario runs, jumps, bonks a block and releases a coin."""
-  jumps = (0, 0, 1, 3, 4, 3, 1, 0, 0, 0)
-  xs = (0, 0, 1, 2, 2, 1, 0, 0, 0, 0)
+  """CHOMP RUN: Pac-Man continuously traverses the maze and clears dots."""
+  path = ((1, 1), (3, 1), (5, 1), (7, 1), (9, 1),
+          (11, 1), (12, 2), (12, 5), (12, 7), (12, 9))
   frames = []
   for i in range(10):
-    grid = mascot.blank(BG_WORK)
-    clouds(grid, shift=i // 2)
-    ground(grid, offset=i)
-
-    question_block(grid, 6, 2, flash=i in (4, 5), empty=i >= 6)
-    pipe(grid, 11, 8, height=4)
-    if i >= 4:
-      rise = (0, 1, 3, 4, 3, 1)[i - 4]
-      coin(grid, 7, max(-1, 1 - rise), shine=i % 2 == 0)
-      pixels(grid, ((5, 1), (15, 1 + i % 2)), CREAM)
-
-    mario(
-      grid, xs[i], 6, jump=jumps[i], step=1 + i % 2,
-      pose="jump" if jumps[i] else "stand"
-    )
+    grid = mascot.blank(INK)
+    pac_maze(grid)
+    hidden = PAC_DOTS[:min(len(PAC_DOTS), i * 3)]
+    pac_pellets(grid, hidden=hidden)
+    x, y = path[i]
+    direction = "down" if i >= 6 else "right"
+    pacman(grid, x, y, direction=direction, mouth=i % 2 == 0)
+    # Ghost-house eyes keep the board alive without turning this into danger.
+    ghost(grid, 7, 6, GHOST_RED, look=-1, blink=i == 8, eyes_only=True)
     frames.append(grid)
-  return frames, [110, 100, 90, 90, 180, 95, 105, 130, 120, 150]
+  return frames, [105] * 10
 
 
 def alerting_frames():
-  """PLAYER NEEDED: Mario waves at a locked castle while its key pulses."""
-  bobs = (0, 0, 1, 1, 0, 0, 1, 0)
+  """HEY: Pac-Man is stopped while one ghost approaches a power pellet."""
   frames = []
   for i in range(8):
-    hot = i in (2, 3, 6)
-    grid = mascot.blank(BG_ALERT_HOT if hot else BG_ALERT_COOL)
-    clouds(grid, shift=0, night=True)
-    ground(grid, danger=False)
-    gate(grid, glow=hot)
-    key(grid, 4, 1 + bobs[i], CREAM if hot else AMBER)
-    pixels(grid, ((4, 1), (4, 4), (9, 0), (9, 4)), HOT if hot else PINK)
-    mario(grid, 0, 6, pose="wave")
+    grid = mascot.blank(INK)
+    pac_maze(grid, wall=PAC_WALL_LIGHT if i in (3, 7) else PAC_WALL)
+    pac_pellets(grid)
+    pacman(grid, 1, 6, direction="right", mouth=i % 3 == 0)
+    power_pellet(grid, 7, 7, bright=i % 2 == 0)
+    ghost(grid, 11 - (i // 4), 6, GHOST_RED, look=-1, blink=i == 6)
+    mascot.rect(grid, 7, 1, 8, 3, GHOST_PINK if i % 2 else CREAM)
+    mascot.px(grid, 7, 5, GHOST_PINK if i % 2 else CREAM)
     frames.append(grid)
-  return frames, [160, 160, 100, 210, 160, 160, 100, 220]
+  return frames, [190, 190, 160, 230, 190, 190, 160, 250]
 
 
 def success_frames():
-  """COURSE CLEAR: Mario grabs the flagpole while fireworks pop."""
-  jumps = (0, 0, 1, 3, 4, 3, 1, 0, 0, 0)
-  xs = (0, 1, 2, 3, 4, 5, 5, 5, 4, 3)
-  flag_y = (2, 2, 2, 3, 4, 5, 6, 7, 7, 7)
+  """BOARD CLEAR: frightened ghosts flee under a cherry bonus shower."""
   frames = []
   for i in range(10):
-    grid = mascot.blank(BG_SUCCESS)
-    clouds(grid, shift=i // 4)
-    ground(grid, offset=0)
-
-    # The ball, tall white pole and descending green flag are the clearest
-    # possible plumber-game victory silhouette at sixteen pixels.
-    # A tiny end castle behind the pole widens the shot into a whole goal area.
-    mascot.rect(grid, 12, 8, 15, 12, BRICK_DARK)
-    pixels(grid, ((12, 7), (13, 7), (15, 7)), BRICK)
-    mascot.rect(grid, 13, 10, 14, 12, INK)
-    mascot.rect(grid, 10, 1, 10, 12, CREAM)
-    coin(grid, 9, 0, shine=True)
-    fy = flag_y[i]
-    mascot.rect(grid, 7, fy, 9, fy + 2, PIPE)
-    pixels(grid, ((7, fy + 2), (8, fy + 3)), PIPE_DARK)
-
-    if i >= 3:
-      burst = i % 3
-      pixels(grid, (
-        (2, 1 + burst), (1, 2 + burst), (3, 2 + burst),
-        (6, burst), (5, 1 + burst), (7, 1 + burst),
-      ), AMBER if i % 2 else CREAM)
-
-    mario(
-      grid, xs[i], 6, jump=jumps[i], step=0,
-      pose="flag" if i >= 3 else "stand"
-    )
+    grid = mascot.blank(INK)
+    wall = (PAC_WALL, PAC_WALL_LIGHT, CREAM)[i % 3]
+    pac_maze(grid, wall=wall, gate=GHOST_PINK)
+    cherry(grid, 6, 1)
+    pacman(grid, 2 + min(i, 5), 7, direction="right", mouth=i % 2 == 0)
+    if i < 6:
+      ghost(grid, 10, 6, GHOST_FRIGHT, look=1, blink=i % 3 == 0)
+    else:
+      ghost(grid, 10, 6, GHOST_FRIGHT, eyes_only=True)
+    if i < 8:
+      ghost(grid, 12, 10, GHOST_FRIGHT, look=1, blink=i % 4 == 0)
+    pixels(grid, ((1, 2 + i % 2), (4, 1), (11, 2), (14, 1 + i % 3)),
+           (AMBER, CREAM, GHOST_CYAN)[i % 3])
     frames.append(grid)
-  return frames, [180, 260, 100, 90, 190, 100, 120, 170, 180, 220]
+  return frames, [130, 120, 110, 150, 110, 180, 110, 160, 130, 220]
 
 
 def error_frames():
-  """GAME OVER BEAT: a Goomba bonks Mario and his cap flies off."""
-  bug_x = (10, 9, 8, 8, 9, 10, 10, 10)
-  recoil = (0, 0, 1, 2, 1, 0, 0, 0)
+  """CAUGHT: a red ghost hits Pac-Man and triggers his death burst."""
   frames = []
   for i in range(8):
-    grid = mascot.blank(SKY if i not in (2, 3) else BG_ALERT_HOT)
-    if i not in (2, 3):
-      clouds(grid, shift=0)
-    ground(grid, danger=False, offset=i)
-    goomba(grid, bug_x[i], 7, blink=i == 6)
-    if i < 2:
-      heart(grid, 4, 1, HOT)
+    grid = mascot.blank(INK)
+    wall = GHOST_RED if i in (2, 3, 4) else PAC_WALL
+    pac_maze(grid, wall=wall)
+    pac_pellets(grid)
+    if i < 3:
+      pacman(grid, 3 + i, 7, direction="right", mouth=i % 2 == 0)
+      ghost(grid, 9 - i, 6, GHOST_RED, look=-1)
+    elif i == 3:
+      ghost(grid, 6, 6, GHOST_RED, look=-1)
+      pixels(grid, ((6, 7), (7, 6), (8, 7), (7, 8)), PAC_YELLOW)
+    elif i == 4:
+      ghost(grid, 6, 6, GHOST_RED, blink=True)
+      pixels(grid, ((7, 5), (5, 7), (9, 7), (7, 9)), PAC_YELLOW)
+    elif i == 5:
+      ghost(grid, 6, 6, GHOST_RED, look=1)
+      pixels(grid, ((5, 5), (9, 5), (5, 9), (9, 9)), PAC_YELLOW)
+    elif i == 6:
+      ghost(grid, 7, 6, GHOST_RED, look=1)
+      pixels(grid, ((4, 4), (10, 4), (4, 10), (10, 10)), PAC_YELLOW)
     else:
-      heart(grid, 4, 0, HOT, broken=True)
-      pixels(grid, ((7, 6), (8, 5), (8, 7), (9, 6)), CREAM if i % 2 else AMBER)
-      cap_x = min(12, 4 + i)
-      cap_y = max(0, 5 - (i - 2))
-      mascot.rect(grid, cap_x, cap_y, cap_x + 3, cap_y, CAP_RED)
-      mascot.rect(grid, cap_x + 2, cap_y + 1, cap_x + 4, cap_y + 1, CAP_RED)
-    mario(
-      grid, max(-1, 1 - recoil[i]), 6, jump=recoil[i],
-      cap=i < 2, pose="hurt" if i >= 2 else "stand"
-    )
+      ghost(grid, 8, 6, GHOST_RED, look=1)
     frames.append(grid)
-  return frames, [170, 110, 90, 210, 120, 180, 200, 220]
+  return frames, [160, 120, 110, 180, 140, 150, 180, 260]
 
 
 def alerting2_frames():
-  """PLAYER NEEDED, NOW: the castle flashes while lava rises."""
-  jumps = (0, 2, 3, 1, 0, 3, 2, 0)
+  """STILL WAITING: two ghosts close in and the maze flashes faster."""
   frames = []
   for i in range(8):
-    hot = i % 2 == 0
-    grid = mascot.blank(BG_ALERT_HOT if hot else BG_ALERT_COOL)
-    ground(grid, danger=True, offset=i * 2)
-    gate(grid, glow=True)
-    key(grid, 5, i % 2, CREAM if hot else HOT)
-    pixels(grid, ((0, 1), (3, 0), (8, 4), (15, 1), (8, 7)), CREAM if hot else HOT)
-    mario(grid, 0, 6, jump=jumps[i], pose="wave")
+    grid = mascot.blank(INK)
+    wall = GHOST_PINK if i % 2 == 0 else PAC_WALL_LIGHT
+    pac_maze(grid, wall=wall, gate=CREAM)
+    pac_pellets(grid)
+    pacman(grid, 1, 6, direction="right", mouth=i % 2 == 0)
+    power_pellet(grid, 6, 7, bright=i % 2 == 0)
+    ghost(grid, 8 - i // 3, 6, GHOST_RED, look=-1)
+    ghost(grid, 11 - i // 4, 9, GHOST_PINK, look=-1, blink=i == 6)
+    mascot.rect(grid, 7, 1, 8, 3, CREAM if i % 2 == 0 else GHOST_RED)
+    mascot.px(grid, 7, 5, CREAM if i % 2 == 0 else GHOST_RED)
     frames.append(grid)
-  return frames, [95, 85, 110, 85, 95, 110, 85, 120]
+  return frames, [100, 90, 100, 90, 100, 90, 100, 120]
 
 
 def alerting3_frames():
-  """BOWSER ALERT: the giant castle boss guards the key in a full strobe."""
+  """CORNERED: four ghosts surround Pac-Man while the entire maze strobes."""
   frames = []
   for i in range(6):
-    hot = i % 2 == 0
-    grid = mascot.blank(HOT if hot else BG_ALERT_COOL)
-    ground(grid, danger=True, offset=i)
-
-    # Green turtle-dragon head, orange crown spikes, pale muzzle and fangs.
-    boss = CREAM if hot else TURTLE
-    mascot.rect(grid, 8, 2, 15, 9, boss)
-    pixels(grid, ((8, 1), (10, 0), (12, 1), (14, 0), (15, 1)), AMBER if hot else HOT)
-    pixels(grid, ((7, 2), (8, 3), (15, 3)), CREAM)
-    mascot.rect(grid, 9, 3, 10, 5, CREAM)
-    mascot.rect(grid, 13, 3, 14, 5, CREAM)
-    pixels(grid, ((10, 4), (13, 4)), INK)
-    mascot.rect(grid, 10, 6, 15, 9, AMBER if hot else CREAM)
-    pixels(grid, ((11, 7), (14, 7)), INK)
-    pixels(grid, ((10, 9), (12, 9), (14, 9)), INK)
-    key(grid, 10, 10, INK if hot else CREAM)
-
-    mario(grid, 0, 6, jump=1 if i in (1, 4) else 0, pose="wave")
+    grid = mascot.blank(INK)
+    wall = (CREAM, GHOST_RED, PAC_WALL_LIGHT)[i % 3]
+    pac_maze(grid, wall=wall, gate=GHOST_PINK)
+    pacman(grid, 6, 7, direction="right", mouth=i % 2 == 0)
+    ghost(grid, 1, 1, GHOST_RED, look=1)
+    ghost(grid, 12, 1, GHOST_PINK, look=-1)
+    ghost(grid, 1, 11, GHOST_CYAN, look=1)
+    ghost(grid, 12, 11, GHOST_ORANGE, look=-1)
+    power_pellet(grid, 1, 7, bright=i % 2 == 0)
+    power_pellet(grid, 13, 7, bright=i % 2 == 1)
     frames.append(grid)
-  return frames, [90, 90, 90, 90, 90, 120]
+  return frames, [80, 80, 80, 80, 80, 100]
 
 
 def compacting_frames():
-  """WARP CLEANUP: loose context blocks spiral neatly into a green pipe."""
+  """BOARD CLEANUP: Pac-Man clears a shrinking ring into one power pellet."""
+  route = ((1, 1), (4, 1), (7, 1), (11, 1),
+           (12, 5), (11, 9), (7, 11), (2, 9))
   frames = []
-  paths = (
-    ((6, 1), (7, 2), (8, 3), (9, 4), (10, 5), (11, 6), (12, 7), (12, 8)),
-    ((12, 1), (13, 2), (14, 3), (14, 4), (13, 5), (12, 6), (12, 7), (12, 8)),
-    ((7, 5), (8, 5), (9, 5), (10, 6), (11, 6), (12, 7), (12, 8), (12, 8)),
-  )
   for i in range(8):
-    grid = mascot.blank(SKY)
-    clouds(grid, shift=i // 3)
-    ground(grid, offset=0)
-
-    # Draw the loose blocks first, then the pipe lip over them so they visibly
-    # vanish down the opening instead of merely stopping above it.
-    for number, path in enumerate(paths):
-      x, y = path[(i + number * 2) % len(path)]
-      colour = (CODE, CODE_LIGHT, AMBER)[number]
-      mascot.rect(grid, x, y, x + 1, y + 1, colour)
-    pipe(grid, 10, 8, height=4)
-    pixels(grid, ((9, 7), (15, 7)), CREAM if i % 2 else PIPE_LIGHT)
-
-    # A blue P-switch gives Mario an obvious "tidy now" control.
-    mascot.rect(grid, 6, 9, 8, 12, OVERALL_BLUE)
-    mascot.rect(grid, 6, 9, 8, 9, CREAM if i in (3, 4) else CODE_LIGHT)
-    mario(grid, 0, 6, pose="read" if i in (3, 4) else "stand")
+    grid = mascot.blank(INK)
+    pac_maze(grid, wall=PAC_WALL_LIGHT if i == 7 else PAC_WALL)
+    hidden = PAC_DOTS[:min(len(PAC_DOTS), i * 4)]
+    pac_pellets(grid, hidden=hidden)
+    x, y = route[i]
+    direction = ("right", "right", "right", "down", "down", "left", "left", "up")[i]
+    pacman(grid, x, y, direction=direction, mouth=i % 2 == 0)
+    if i >= 4:
+      power_pellet(grid, 7, 7, bright=i % 2 == 0)
+    pixels(grid, ((2 + i // 2, 7), (13 - i // 2, 7)),
+           CREAM if i % 2 else PAC_PELLET)
     frames.append(grid)
-  return frames, [140, 130, 120, 110, 110, 120, 150, 200]
+  return frames, [120, 120, 120, 120, 130, 130, 150, 240]
 
 
 def off_frames():
@@ -503,15 +539,15 @@ def off_frames():
 
 
 FACES = {
-  "thinking": (thinking_frames, "WORLD MAP -- quietly considering two routes"),
-  "working": (working_frames, "WORLD 1-1 -- running, jumping and bonking a block"),
-  "alerting": (alerting_frames, "PLAYER NEEDED -- key at the locked castle"),
-  "alerting2": (alerting2_frames, "PLAYER NEEDED -- castle flashes, lava rises"),
-  "alerting3": (alerting3_frames, "BOWSER ALERT -- full castle-boss strobe"),
-  "compacting": (compacting_frames, "WARP CLEANUP -- blocks disappear into a pipe"),
-  "success": (success_frames, "COURSE CLEAR -- flagpole and fireworks"),
-  "error": (error_frames, "BONK -- Goomba knocks off Mario's cap"),
-  "chilling": (chilling_frames, "1-UP REST STOP -- pipe, mushroom and a nap"),
+  "thinking": (thinking_frames, "READY -- stationary at a pulsing maze fork"),
+  "working": (working_frames, "CHOMP RUN -- traversing and clearing pellets"),
+  "alerting": (alerting_frames, "HEY -- one ghost, slow pulse"),
+  "alerting2": (alerting2_frames, "STILL WAITING -- two ghosts, fast flash"),
+  "alerting3": (alerting3_frames, "CORNERED -- four-ghost full-maze strobe"),
+  "compacting": (compacting_frames, "BOARD CLEANUP -- dots compress to a power pellet"),
+  "success": (success_frames, "BOARD CLEAR -- frightened ghosts and cherry bonus"),
+  "error": (error_frames, "CAUGHT -- ghost collision and death burst"),
+  "chilling": (chilling_frames, "ATTRACT MODE -- sleeping on an untouched board"),
   "off": (off_frames, "blank display"),
 }
 
