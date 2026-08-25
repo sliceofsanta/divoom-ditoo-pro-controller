@@ -1,28 +1,29 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into a tiny **Pac-Man progress board** for
-[Claude Code](https://claude.com/claude-code). Every state keeps the complete
-16x16 neon maze visible: Pac-Man and the ghosts remain tiny pieces moving inside
-the grid instead of becoming zoomed-in character portraits.
+Turn a Divoom Ditoo Pro into **Claude's tiny workshop** for
+[Claude Code](https://claude.com/claude-code). The nine states tell one continuous
+construction story: blueprint, materials, hammering, testing, and a finished
+glowing building. Claude and the main prop split the 16x16 stage into two large,
+readable silhouettes instead of filling it with tiny decorative pixels.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | **READY:** Pac-Man stays still at a fork while the two routes pulse |
-| `working` | Claude runs a tool | **CHOMP RUN:** traverses the grid continuously, clearing pellets behind him |
-| `compacting` | Claude compacts context | **BOARD CLEANUP:** clears a shrinking pellet ring into one power pellet |
-| `alerting` | Claude needs your input | **HEY:** one ghost approaches, power pellet and exclamation pulse slowly |
-| `alerting2` | still waiting after 1 minute | **STILL WAITING:** two ghosts close in while the maze flashes faster |
-| `alerting3` | still waiting after 5 minutes | **CORNERED:** four ghosts surround Pac-Man under a full-maze strobe |
-| `success` | Claude finished responding | **BOARD CLEAR:** frightened ghosts flee under a cherry bonus shower |
-| `error` | a tool or the turn failed | **CAUGHT:** ghost collision followed by Pac-Man's death burst |
-| `chilling` | a session starts, or manual | **ATTRACT MODE:** untouched pellet grid, sleeping Pac-Man, ghosts resting at home |
+| `thinking` | you submit a prompt | **BLUEPRINT:** Claude points at a large cyan plan of the workshop |
+| `working` | Claude runs a tool | **HAMMER TIME:** hard-hat Claude swings a huge hammer beside the scaffold |
+| `compacting` | Claude compacts context | **MATERIAL SORT:** loose bricks and planks pack into one tidy crate |
+| `alerting` | Claude needs your input | **TEST WAIT:** the completed shell waits at a slow yellow test light |
+| `alerting2` | still waiting after 1 minute | **STILL WAITING:** two questions and faster orange test flashes |
+| `alerting3` | still waiting after 5 minutes | **SITE ALARM:** both hands up under a rooftop siren and red strobe |
+| `success` | Claude finished responding | **GRAND OPENING:** windows glow, confetti falls, and Claude jumps |
+| `error` | a tool or the turn failed | **BUILD FAILED:** a red crack, smoke, falling brick, and Claude's X eyes |
+| `chilling` | a session starts, or manual | **AFTER HOURS:** Claude sleeps beside one warm workshop window |
 | `off` | the session ends, or manual | blank display |
 
-The board uses one-pixel blue maze walls, cream pellets, large power pellets and
-three-wide characters. State meaning comes from board state and choreography:
-stationary versus clearing, one ghost versus four, full pellets versus an empty
-board, normal ghosts versus frightened blue ghosts, and calm blue walls versus
-red/white escalation flashes.
+The camera and stage never move: Claude owns the left half and the project owns
+the right. The hard hat, blueprint, crate, hammer, scaffold, test cable, house
+silhouette and cracked wall are all deliberately oversized. State meaning comes
+from those props and their motion, with colour reserved for cyan planning,
+yellow construction, green success and red failure or urgency.
 
 The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
@@ -284,10 +285,10 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 fallback if no GIF exists. `alerting2` and `alerting3` are the automatic
 one-minute and five-minute escalations used by the daemon.
 
-To edit the bundled ones, change the board scenes in
+To edit the bundled ones, change the workshop scenes in
 [`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The same file
-contains the reusable `pac_maze()`, `pacman()`, `ghost()`, `pac_pellets()`,
-`power_pellet()` and `cherry()` drawing primitives:
+contains reusable drawing primitives for the blueprint, materials crate,
+scaffold, hammer, test light and finished workshop:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -303,9 +304,9 @@ props and sparks deliberately run on different beats. And every jump uses a
 short launch plus a held apex; evenly spaced positions look like teleportation
 at this scale.
 
-The older Claude and Mario drawing experiments remain as reusable legacy
-helpers, but none of these nine animations uses them. The Pac-Man grid and
-characters are drawn from scratch rather than copied from an arcade ROM.
+The workshop is drawn from scratch directly on the 16x16 grid. Claude's reusable
+body rig lives in [`faces/mascot.py`](faces/mascot.py), so his face, terracotta
+body and four-foot silhouette remain consistent across every scene.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you

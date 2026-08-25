@@ -124,17 +124,17 @@ def draw(bg, body_y=3, body_h=7, legs=(0, 0, 0, 0), hand_l=0, hand_r=0,
 def draw_player(grid, x, y, jump=0, step=0, hand_l=0, hand_r=0,
                 gaze=0, blink=False, expression="open", body=BODY,
                 dark=BODY_DARK, light=BODY_LIGHT, hat=None, overalls=None):
-  """Draw the mascot as a tiny arcade player inside an existing scene.
+  """Draw the mascot as a compact character inside an existing scene.
 
-  The portrait rig above is for close-ups. This seven-column player sprite is
-  deliberately smaller so a 16x16 frame has room for a level, enemies and big
+  The portrait rig above is for close-ups. This seven-column scene sprite is
+  deliberately smaller so a 16x16 frame has room for a workshop and big
   readable props. He still keeps the source terracotta, cream face, blocky top
   plane and four feet, so he remains Claude rather than becoming a generic
   orange game blob.
 
   ``x, y`` is the top-left of the six-row body at rest. Positive ``jump``
   raises the whole sprite. ``step`` alternates which pair of feet is visible,
-  producing a chunky two-frame arcade run.
+  producing a chunky two-frame walk or work cycle.
   """
   top = y - jump
 
