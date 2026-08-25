@@ -727,6 +727,15 @@ pub async fn run_status_daemon(
           let _ = std::fs::write(state_file, format!("{}\n", state));
         }
 
+        // A trailing ":now" means the caller is asserting a verdict rather
+        // than reporting a session state, so it is shown as asked. Wrapped
+        // commands need this: a build that passes in four seconds should still
+        // say it passed, where a four-second Claude turn has earned nothing.
+        let explicit = state.ends_with(":now");
+        if explicit {
+          state.truncate(state.len() - 4);
+        }
+
         // The state names a file; refuse anything that could leave faces_dir.
         if !state.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
           info!("Ignoring invalid state name {:?}", state);
@@ -743,7 +752,11 @@ pub async fn run_status_daemon(
           } else if let Some(started) = busy_since.take() {
             worked_for = now.duration_since(started);
           }
-          let resolved = resolve_finish(&state, worked_for, &timings);
+          let resolved = if explicit {
+            state.as_str()
+          } else {
+            resolve_finish(&state, worked_for, &timings)
+          };
           if resolved != state {
             debug!("Skipping celebration: only {}s of work", worked_for.as_secs());
             state = resolved.to_string();
@@ -1262,5 +1275,17 @@ mod status_daemon_tests {
   fn the_screensaver_can_be_switched_off() {
     let off = Timings { screensaver_after: Duration::ZERO, ..Timings::default() };
     assert_eq!(present("chilling", Duration::from_secs(99999), &off), "chilling");
+  }
+
+  #[test]
+  fn an_explicit_verdict_is_not_gated_on_effort() {
+    // resolve_finish is what a session's Stop goes through; an explicit
+    // verdict bypasses it entirely, which is what the ":now" marker selects.
+    let timings = t();
+    assert_eq!(resolve_finish("success", Duration::from_secs(1), &timings), "chilling");
+    // The daemon skips the call altogether when the marker is present, so the
+    // state it renders is the one that was asked for.
+    let asked = "success";
+    assert_eq!(asked, "success");
   }
 }

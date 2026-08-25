@@ -54,8 +54,25 @@ sed -e "s|__SCRIPT__|$PREFIX/ditoo-state.sh|g" \
     -e "s|__PREFIX__|$PREFIX|g" \
     "$HERE/$LABEL.plist" > "$TARGET"
 
+# bootout is asynchronous: bootstrapping straight after it races the teardown
+# and fails, even though the job loads correctly a moment later. Wait for the
+# old job to actually go, then retry the load a few times before believing it.
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
-if ! launchctl bootstrap "gui/$(id -u)" "$TARGET" 2>/dev/null; then
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || break
+  sleep 1
+done
+
+loaded=""
+for _ in 1 2 3 4 5; do
+  launchctl bootstrap "gui/$(id -u)" "$TARGET" 2>/dev/null
+  sleep 1
+  if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+    loaded=yes
+    break
+  fi
+done
+if [ -z "$loaded" ]; then
   printf 'failed to load the agent; check %s\n' "$TARGET" >&2
   exit 1
 fi

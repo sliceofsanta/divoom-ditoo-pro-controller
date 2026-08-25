@@ -29,6 +29,40 @@ The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
 from a status light into a tiny desk companion.
 
+## Any command, not just Claude Code
+
+```bash
+./integrations/claude-code/ditoo-run.sh cargo test
+./integrations/claude-code/ditoo-run.sh npm run build
+```
+
+Shows `working` while it runs, then `success` or `error` from the exit code.
+The command's output and exit status pass straight through, so it wraps
+anything -- including inside a pipeline or a Makefile. Each wrapped command
+takes its own slot in the merge, so several can run at once without clobbering
+a Claude Code session's state, and the slot is released even on Ctrl-C.
+
+It reports verdicts as `success:now` / `error:now`. The `:now` suffix tells the
+daemon the caller means it: the earned-celebration rule (ten minutes of work
+before a celebration counts) is right for a Claude turn and wrong for a build
+that passed in four seconds.
+
+## Run it from login
+
+```bash
+./integrations/claude-code/install-launchagent.sh          # install
+./integrations/claude-code/install-launchagent.sh remove   # uninstall
+```
+
+Registers a LaunchAgent so the daemon starts at login and is restarted if it
+dies, making the panel a permanent surface rather than something that exists
+only while a Claude Code session is open.
+
+The installer COPIES the binary, scripts and faces into
+`~/Library/Application Support/ditoo`, because macOS will not let a LaunchAgent
+execute anything inside `~/Documents`. **Re-run it after changing faces or
+rebuilding** -- the agent uses the copies, not the repository.
+
 ## Drawing anything
 
 ```bash
