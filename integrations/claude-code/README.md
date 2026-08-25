@@ -53,6 +53,10 @@ teammates and never fire for subagents). Pips clear at the start of each turn.
 Past 16 agents the pips would be thinner than a pixel, so it scales down to a
 proportion, rounded down -- it will never claim more progress than there is.
 
+The count is per session and the panel shows the total, so with several windows
+open the pips answer "how many agents are out" rather than picking one window's
+fan-out. A window starting a new turn clears only its own.
+
 Clauddy remains the largest object in every frame. There is no cream face panel,
 costume, scenery or split-screen composition: the terracotta body itself is the
 character. Cyan is reserved for plans and tidy-up, yellow for attention and

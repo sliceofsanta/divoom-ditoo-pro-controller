@@ -97,6 +97,31 @@ count_lines() {
   printf '%s' "${n:-0}"
 }
 
+# Recompute the pip count shown on the panel: agents out across every session.
+#
+# The counters are PER SESSION because these files are shared. A single global
+# pair meant one window starting a turn wiped another window's in-flight
+# fan-out, and the surviving stops then counted against nothing -- the pips
+# vanished mid-fan-out. Summing is also the honest reading for one shared
+# panel: it answers "how many agents are out", which is the question you have
+# when you are looking at it.
+recompute_fanout() {
+  local started=0 finished=0 f
+  for f in "$RUNDIR"/fanout.*.start; do
+    [ -f "$f" ] || continue
+    started=$((started + $(count_lines "$f")))
+  done
+  for f in "$RUNDIR"/fanout.*.done; do
+    [ -f "$f" ] || continue
+    finished=$((finished + $(count_lines "$f")))
+  done
+  if [ "$started" -gt 0 ]; then
+    printf '%s/%s\n' "$finished" "$started" > "$RUNDIR/fanout" 2>/dev/null
+  else
+    rm -f "$RUNDIR/fanout" 2>/dev/null
+  fi
+}
+
 # Claude Code puts the session id on stdin. Several sessions can drive one
 # panel, so each writes its own state file and the daemon merges them --
 # without this they overwrite each other and the display shows whichever
@@ -271,7 +296,9 @@ case "${1:-}" in
     # A session that has finished must stop voting. Without this its last state
     # sits in the merge until it ages out, so a window closed while "working"
     # keeps the panel busy for a quarter of an hour after the work stopped.
-    rm -f "$SESSIONS/$(session_id)" 2>/dev/null
+    id="$(session_id)"
+    rm -f "$SESSIONS/$id" "$RUNDIR/fanout.$id.start" "$RUNDIR/fanout.$id.done" 2>/dev/null
+    recompute_fanout
     exit 0
     ;;
   draw)
@@ -405,7 +432,9 @@ case "${1:-}" in
     #   - the daemon holds a verdict indefinitely while nobody has come back to
     #     it, so a build that failed overnight is still red in the morning.
     #     This is the "came back" signal that releases the hold.
-    rm -f "$RUNDIR/fanout" "$RUNDIR/fanout.start" "$RUNDIR/fanout.done" 2>/dev/null
+    id="$(session_id)"
+    rm -f "$RUNDIR/fanout.$id.start" "$RUNDIR/fanout.$id.done" 2>/dev/null
+    recompute_fanout
     : > "$RUNDIR/last-prompt" 2>/dev/null
     exit 0
     ;;
@@ -419,16 +448,15 @@ case "${1:-}" in
     # two hooks racing both get counted.
     case "${2:-}" in
       start|done)
-        printf 'x\n' >> "$RUNDIR/fanout.${2}" 2>/dev/null
-        started="$(count_lines "$RUNDIR/fanout.start")"
-        finished="$(count_lines "$RUNDIR/fanout.done")"
-        if [ "$started" -gt 0 ]; then
-          printf '%s/%s\n' "$finished" "$started" > "$RUNDIR/fanout"
-        fi
+        printf 'x\n' >> "$RUNDIR/fanout.$(session_id).${2}" 2>/dev/null
+        recompute_fanout
         ;;
       clear)
         # At the start of a turn: last turn's pips are not this turn's news.
-        rm -f "$RUNDIR/fanout" "$RUNDIR/fanout.start" "$RUNDIR/fanout.done" 2>/dev/null
+        # This session's only -- another window may be mid-fan-out.
+        id="$(session_id)"
+        rm -f "$RUNDIR/fanout.$id.start" "$RUNDIR/fanout.$id.done" 2>/dev/null
+        recompute_fanout
         ;;
       *)
         printf 'usage: %s fanout start|done|clear\n' "$(basename "$SELF")" >&2
