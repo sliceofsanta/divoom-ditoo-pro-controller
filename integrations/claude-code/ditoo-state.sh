@@ -31,6 +31,7 @@ APPLIED="$RUNDIR/applied"
 LOCK="$RUNDIR/lock"
 LOG="$RUNDIR/log"
 PIDFILE="$RUNDIR/daemon.pid"
+SESSIONS="$RUNDIR/sessions"
 
 # Lock older than this is assumed to belong to a dead worker.
 STALE_LOCK_SECONDS="${DITOO_STALE_LOCK_SECONDS:-90}"
@@ -78,6 +79,30 @@ file_mtime() {
 
 read_state_file() {
   cat "$1" 2>/dev/null || printf ''
+}
+
+# Claude Code puts the session id on stdin. Several sessions can drive one
+# panel, so each writes its own state file and the daemon merges them --
+# without this they overwrite each other and the display shows whichever
+# session moved last rather than the one that needs you.
+#
+# Extracted with grep rather than a JSON parser on purpose: this runs on every
+# hook, and spawning python here would cost more than the rest of the script.
+session_id() {
+  local raw=""
+  if [ ! -t 0 ]; then
+    raw="$(head -c 4096 2>/dev/null)"
+  fi
+  local id
+  id="$(printf '%s' "$raw" \
+    | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+  # Anything outside this set would let a crafted id escape $SESSIONS.
+  case "$id" in
+    "" ) printf 'manual' ;;
+    *[!a-zA-Z0-9_-]* ) printf 'manual' ;;
+    * ) printf '%s' "$id" ;;
+  esac
 }
 
 # True when a daemon holds the connection. A pid file whose process is gone is
@@ -242,6 +267,16 @@ case "${1:-}" in
     else
       printf 'daemon  : not running -- each change reconnects (device will chime)\n'
     fi
+    live=0
+    if [ -d "$SESSIONS" ]; then
+      live=$(find "$SESSIONS" -type f -mmin -15 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    if [ "$live" -gt 1 ]; then
+      printf 'sessions: %s live -- panel shows the highest priority:\n' "$live"
+      find "$SESSIONS" -type f -mmin -15 2>/dev/null | while read -r f; do
+        printf '            %s = %s\n' "$(basename "$f" | cut -c1-8)" "$(cat "$f" 2>/dev/null)"
+      done
+    fi
     printf 'desired : %s\n' "$(read_state_file "$DESIRED")"
     printf 'applied : %s\n' "$(read_state_file "$APPLIED")"
     if [ -d "$LOCK" ]; then
@@ -264,6 +299,8 @@ case "${1:-}" in
     ;;
 esac
 
+mkdir -p "$SESSIONS" 2>/dev/null
+printf '%s\n' "$STATE" >"$SESSIONS/$(session_id)" 2>/dev/null
 printf '%s\n' "$STATE" >"$DESIRED" 2>/dev/null
 
 # If the daemon is running it is watching $DESIRED, which we just wrote, so

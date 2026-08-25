@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Generate Super Claude Bros., a tiny 16x16 status game for Ditoo Pro.
+"""Generate a tiny Super Mario status world for the Ditoo Pro.
 
 Every Claude Code state is another scene in the same miniature platformer:
 
-    thinking    Claude studies a level map without moving
-    working     Claude runs through bricks, coins and a warp pipe
+    thinking    Mario studies a level map without moving
+    working     Mario runs through bricks, coins and a warp pipe
     alerting    a castle door waits for the player's key
     compacting  loose code blocks disappear into a warp pipe
-    success     Claude grabs the flagpole under fireworks
-    error       a Goomba-like bug bonks Claude and knocks off his cap
-    chilling    Claude naps on a warp pipe beside a mushroom
+    success     Mario grabs the flagpole under fireworks
+    error       a Goomba bonks Mario and knocks off his cap
+    chilling    Mario naps on a warp pipe beside a mushroom
 
-The mascot becomes a real player sprite instead of occupying the entire panel.
-That leaves enough room for platforms, enemies, machines and oversized props,
-so every loop reads as an action rather than a collection of unrelated pixels.
+Mario is only five pixels wide, leaving most of the panel for recognisable
+level geometry: sky, bricks, question blocks, pipes, enemies and castles.
 
-Stdlib only (see mascot.py for the sprite and gifwriter.py for the encoder), so
-this runs anywhere without pip installs.
+Stdlib only (see gifwriter.py for the encoder), so this runs anywhere without
+pip installs.
 
     python3 generate_faces.py            # write the GIFs (+ PNG fallbacks)
     python3 generate_faces.py --preview  # also write 320x320 preview GIFs
@@ -29,7 +28,7 @@ import sys
 import zlib
 
 import mascot
-from mascot import BODY, SIZE, draw_player
+from mascot import SIZE
 from gifwriter import write_gif
 
 # A deliberately recognisable 8-bit plumber palette: blue overworld sky,
@@ -69,6 +68,9 @@ PIPE_LIGHT = (130, 232, 102)
 LAVA = (245, 51, 35)
 LAVA_LIGHT = (255, 194, 55)
 TURTLE = (91, 190, 74)
+MARIO_SKIN = (255, 187, 112)
+MARIO_HAIR = (79, 37, 22)
+MARIO_BOOT = (96, 43, 27)
 
 
 def pixels(grid, points, colour):
@@ -97,9 +99,67 @@ def clouds(grid, shift=0, night=False):
     ), colour)
 
 
-def hero(grid, x, y, **pose):
-  """Claude in a red cap and blue overalls: mascot first, plumber second."""
-  draw_player(grid, x, y, hat=CAP_RED, overalls=OVERALL_BLUE, **pose)
+def mario(grid, x, y, jump=0, step=0, pose="stand", facing=1, cap=True):
+  """An original five-wide miniature Mario sprite.
+
+  The previous seven-wide Claude costume left too little room for a level.
+  This tighter silhouette gives the environment eleven columns while retaining
+  Mario's unmistakable red cap, warm face, black hair/moustache, red shirt,
+  blue overalls and brown boots. It is drawn from scratch rather than copied
+  from a Nintendo sprite sheet.
+  """
+  top = y - jump
+
+  def dot(local_x, local_y, colour):
+    actual_x = local_x if facing >= 0 else 4 - local_x
+    mascot.px(grid, x + actual_x, top + local_y, colour)
+
+  if cap:
+    for local_x in (1, 2, 3):
+      dot(local_x, 0, CAP_RED)
+    for local_x in (0, 1, 2, 3, 4):
+      dot(local_x, 1, CAP_RED)
+    dot(2, 0, CREAM)
+
+  # Hair, skin, single eye and a two-pixel moustache.
+  for local_x, local_y in ((0, 2), (0, 3), (1, 3), (3, 3), (4, 3)):
+    dot(local_x, local_y, MARIO_HAIR)
+  for local_x, local_y in ((1, 2), (2, 2), (3, 2), (1, 3), (2, 3)):
+    dot(local_x, local_y, MARIO_SKIN)
+  dot(4, 2, INK if pose != "sleep" else MARIO_HAIR)
+
+  # Red shirt and blue bib. Poses only move the arms; the strong colour blocks
+  # stay stable so the character remains legible during fast loops.
+  dot(1, 4, CAP_RED)
+  dot(2, 4, OVERALL_BLUE)
+  dot(3, 4, CAP_RED)
+  for local_x in (1, 2, 3):
+    dot(local_x, 5, OVERALL_BLUE)
+  if pose == "wave":
+    dot(0, 4, MARIO_SKIN)
+    dot(4, 2, MARIO_SKIN)
+    dot(4, 1, MARIO_SKIN)
+  elif pose == "read":
+    dot(0, 4, MARIO_SKIN)
+    dot(4, 4, MARIO_SKIN)
+    dot(4, 5, MARIO_SKIN)
+  elif pose == "flag":
+    dot(0, 4, MARIO_SKIN)
+    dot(4, 3, MARIO_SKIN)
+    mascot.px(grid, x + (5 if facing >= 0 else -1), top + 2, MARIO_SKIN)
+  else:
+    dot(0, 4, MARIO_SKIN)
+    dot(4, 4, MARIO_SKIN)
+
+  # Alternating boot positions provide the classic two-frame run.
+  if step == 1:
+    boots = (0, 3)
+  elif step == 2:
+    boots = (1, 4)
+  else:
+    boots = (1, 3)
+  for local_x in boots:
+    dot(local_x, 6, MARIO_BOOT)
 
 
 def question_block(grid, x, y, flash=False, empty=False):
@@ -200,50 +260,45 @@ def gate(grid, glow=False):
 
 
 def thinking_frames():
-  """QUEST LOG: Claude stays put, reads a map and weighs two routes."""
-  gazes = (1, 1, 0, 1, 1, 1, 0, 1, 1, 1)
+  """WORLD MAP: Mario stays put and quietly studies two routes."""
   frames = []
   for i in range(10):
     grid = mascot.blank(BG_THINK)
+    clouds(grid, shift=0)
     ground(grid, offset=0)
 
-    # A huge parchment quest map gives "reading" a clear physical prop. The
-    # cyan trail forks at the top; Claude's eyes and the two destinations pulse
-    # slowly as he considers them, but his feet never move.
-    mascot.rect(grid, 9, 3, 15, 11, mascot.BODY_DARK)
-    mascot.rect(grid, 8, 3, 14, 10, CREAM)
-    mascot.rect(grid, 9, 3, 15, 4, AMBER)
-    mascot.rect(grid, 8, 9, 14, 10, AMBER)
-    pixels(grid, ((9, 8), (10, 8), (10, 7), (11, 7), (11, 6), (12, 6)), CODE)
-    pixels(grid, ((13, 5), (13, 7)), CODE_DARK)
+    # The map is smaller than before, widening the shot enough to see Mario,
+    # sky, clouds and brick floor as one complete overworld scene.
+    mascot.rect(grid, 7, 3, 13, 11, MARIO_HAIR)
+    mascot.rect(grid, 6, 3, 12, 10, CREAM)
+    mascot.rect(grid, 7, 3, 13, 4, AMBER)
+    mascot.rect(grid, 6, 9, 12, 10, AMBER)
+    pixels(grid, ((7, 8), (8, 8), (8, 7), (9, 7), (9, 6), (10, 6)), CODE)
+    pixels(grid, ((11, 5), (11, 7)), CODE_DARK)
     if i % 4 < 2:
-      pixels(grid, ((13, 5), (14, 4), (14, 5)), MINT)
-      mascot.px(grid, 13, 7, CODE_DARK)
+      pixels(grid, ((11, 5), (12, 4), (12, 5)), PIPE)
+      mascot.px(grid, 11, 7, CODE_DARK)
     else:
-      pixels(grid, ((13, 7), (14, 7), (14, 8)), PINK)
-      mascot.px(grid, 13, 5, CODE_DARK)
+      pixels(grid, ((11, 7), (12, 7), (12, 8)), CAP_RED)
+      mascot.px(grid, 11, 5, CODE_DARK)
 
     # Thought bubbles rise from the mascot toward a tiny question glyph.
-    mascot.px(grid, 6, 5, CODE_DARK)
-    mascot.px(grid, 7, 3 + i % 2, CODE)
-    pixels(grid, ((7, 0), (8, 0), (9, 1), (8, 2), (8, 3)), CODE_LIGHT)
+    mascot.px(grid, 5, 5, CODE_DARK)
+    pixels(grid, ((13, 0), (14, 0), (15, 1), (14, 2), (14, 3)), CODE_LIGHT)
 
-    draw_player(
-      grid, 0, 7, jump=0, step=0,
-      hand_l=1, hand_r=-1,
-      gaze=gazes[i], blink=i == 6, expression="open"
-    )
+    mario(grid, 0, 6, pose="read")
     frames.append(grid)
   return frames, [220, 220, 220, 260, 220, 220, 110, 260, 220, 280]
 
 
 def chilling_frames():
-  """SAVE POINT: Claude dozes beside a warm animated campfire."""
-  stars = ((1, 1), (5, 2), (9, 0), (14, 3), (11, 5))
+  """1-UP REST STOP: Mario naps beside a green pipe and mushroom."""
+  stars = ((1, 1), (5, 2), (9, 0), (14, 3))
   frames = []
   for i in range(12):
     grid = mascot.blank(BG_CHILL)
     ground(grid, offset=0)
+    clouds(grid, shift=i // 3, night=True)
     for number, (x, y) in enumerate(stars):
       mascot.px(grid, x, y, CREAM if (i + number * 2) % 6 == 0 else CODE_DARK)
 
@@ -252,154 +307,126 @@ def chilling_frames():
     pixels(grid, ((13, 0), (14, 0), (12, 1), (13, 2), (14, 2)), CREAM)
     if i % 6 < 4:
       z_y = 4 - i % 4
-      pixels(grid, ((6, z_y), (7, z_y), (7, z_y + 1), (6, z_y + 2), (7, z_y + 2)), CODE_LIGHT)
+      pixels(grid, ((5, z_y), (6, z_y), (6, z_y + 1), (5, z_y + 2), (6, z_y + 2)), CODE_LIGHT)
 
-    # Logs and a two-tone flame alternate independently for organic flicker.
-    pixels(grid, ((9, 12), (10, 11), (11, 12), (12, 11), (13, 12), (14, 12)), mascot.BODY_DARK)
-    flame = (
-      ((11, 11), (12, 10), (12, 9), (13, 11)),
-      ((11, 11), (11, 10), (12, 11), (13, 10), (13, 9)),
-      ((11, 11), (12, 10), (13, 11), (12, 8)),
-    )[i % 3]
-    pixels(grid, flame, HOT)
-    pixels(grid, ((12, 11), (12, 10)), AMBER)
-    if i % 4 == 0:
-      mascot.px(grid, 12, 9, CREAM)
+    pipe(grid, 9, 8, height=4)
+    mushroom(grid, 11, 3 + (i // 3) % 2, CAP_RED if i % 4 else CREAM)
 
-    draw_player(
-      grid, 0, 7, step=0, hand_l=1, hand_r=1,
-      expression="sleep", blink=True
-    )
+    mario(grid, 0, 6, pose="sleep")
     frames.append(grid)
   return frames, [240] * 12
 
 
 def working_frames():
-  """CODE DUNGEON: run, raise hammer, smash wall, shower sparks."""
+  """WORLD 1-1: Mario runs, jumps, bonks a block and releases a coin."""
+  jumps = (0, 0, 1, 3, 4, 3, 1, 0, 0, 0)
+  xs = (0, 0, 1, 2, 2, 1, 0, 0, 0, 0)
   frames = []
   for i in range(10):
-    phase = i % 5
     grid = mascot.blank(BG_WORK)
+    clouds(grid, shift=i // 2)
     ground(grid, offset=i)
 
-    # Tiny score/progress pips make the whole composition read as a game HUD.
-    for pip in range(5):
-      colour = CREAM if pip == (i // 2) % 5 else CODE_DARK
-      mascot.rect(grid, 1 + pip * 3, 0, 2 + pip * 3, 0, colour)
+    question_block(grid, 6, 2, flash=i in (4, 5), empty=i >= 6)
+    pipe(grid, 11, 8, height=4)
+    if i >= 4:
+      rise = (0, 1, 3, 4, 3, 1)[i - 4]
+      coin(grid, 7, max(-1, 1 - rise), shine=i % 2 == 0)
+      pixels(grid, ((5, 1), (15, 1 + i % 2)), CREAM)
 
-    # The code wall is a large cyan dungeon obstacle, with cracks that appear
-    # at impact and glowing fragments that fly into the sky.
-    mascot.rect(grid, 11, 5, 15, 12, CODE_DARK)
-    mascot.rect(grid, 12, 6, 15, 12, CODE)
-    pixels(grid, ((12, 7), (14, 7), (13, 9), (15, 10), (12, 12)), CODE_LIGHT)
-    if phase in (3, 4):
-      pixels(grid, ((12, 6), (13, 7), (12, 8), (14, 9), (13, 10), (14, 11)), INK)
-      pixels(grid, ((10, 4), (9, 6), (14, 3), (15, 1), (10, 9)), CODE_LIGHT)
-
-    draw_player(
-      grid, 1, 7, step=1 + i % 2 if phase == 0 else 0,
-      hand_l=0, hand_r=-2 if phase in (1, 2) else 0,
-      gaze=1, expression="happy" if phase == 4 else "open"
+    mario(
+      grid, xs[i], 6, jump=jumps[i], step=1 + i % 2,
+      pose="jump" if jumps[i] else "stand"
     )
-
-    # A four-beat hammer arc: overhead, diagonal, impact, recoil.
-    if phase == 1:
-      pixels(grid, ((8, 8), (9, 7), (10, 6), (11, 5)), AMBER)
-      mascot.rect(grid, 10, 3, 13, 5, CREAM)
-    elif phase == 2:
-      pixels(grid, ((8, 9), (9, 8), (10, 7), (11, 7)), AMBER)
-      mascot.rect(grid, 12, 6, 14, 8, CREAM)
-    elif phase == 3:
-      mascot.rect(grid, 8, 10, 12, 10, AMBER)
-      mascot.rect(grid, 13, 9, 15, 11, CREAM)
-    elif phase == 4:
-      pixels(grid, ((8, 9), (9, 8), (10, 7)), AMBER)
-      mascot.rect(grid, 10, 5, 13, 7, CREAM)
     frames.append(grid)
-  return frames, [105, 130, 95, 170, 110] * 2
+  return frames, [110, 100, 90, 90, 180, 95, 105, 130, 120, 150]
 
 
 def alerting_frames():
-  """PLAYER NEEDED: Claude waves at a locked gate while its key pulses."""
+  """PLAYER NEEDED: Mario waves at a locked castle while its key pulses."""
   bobs = (0, 0, 1, 1, 0, 0, 1, 0)
   frames = []
   for i in range(8):
     hot = i in (2, 3, 6)
     grid = mascot.blank(BG_ALERT_HOT if hot else BG_ALERT_COOL)
+    clouds(grid, shift=0, night=True)
     ground(grid, danger=False)
     gate(grid, glow=hot)
-    key(grid, 5, 1 + bobs[i], CREAM if hot else AMBER)
+    key(grid, 4, 1 + bobs[i], CREAM if hot else AMBER)
     pixels(grid, ((4, 1), (4, 4), (9, 0), (9, 4)), HOT if hot else PINK)
-    draw_player(
-      grid, 0, 7, hand_l=1, hand_r=-2 if i % 2 else -1,
-      gaze=1, expression="shock" if hot else "open"
-    )
+    mario(grid, 0, 6, pose="wave")
     frames.append(grid)
   return frames, [160, 160, 100, 210, 160, 160, 100, 220]
 
 
 def success_frames():
-  """LEVEL CLEAR: a treasure chest opens and Claude jumps through coins."""
+  """COURSE CLEAR: Mario grabs the flagpole while fireworks pop."""
   jumps = (0, 0, 1, 3, 4, 3, 1, 0, 0, 0)
-  coin_seeds = ((7, 4), (10, 2), (13, 4), (6, 7), (12, 7))
+  xs = (0, 1, 2, 3, 4, 5, 5, 5, 4, 3)
+  flag_y = (2, 2, 2, 3, 4, 5, 6, 7, 7, 7)
   frames = []
   for i in range(10):
     grid = mascot.blank(BG_SUCCESS)
+    clouds(grid, shift=i // 4)
     ground(grid, offset=0)
 
-    # Chest body stays planted while the lid snaps open on a held anticipation
-    # frame, a classic arcade reward beat.
-    mascot.rect(grid, 9, 9, 15, 12, mascot.BODY_DARK)
-    mascot.rect(grid, 10, 10, 14, 11, AMBER)
-    mascot.rect(grid, 12, 10, 13, 11, CREAM)
-    if i < 2:
-      mascot.rect(grid, 9, 7, 15, 9, AMBER)
-      mascot.rect(grid, 10, 7, 14, 7, CREAM)
-    else:
-      mascot.rect(grid, 10, 5, 15, 6, AMBER)
-      mascot.rect(grid, 11, 5, 14, 5, CREAM)
-      mascot.rect(grid, 9, 8, 15, 9, INK)
+    # The ball, tall white pole and descending green flag are the clearest
+    # possible plumber-game victory silhouette at sixteen pixels.
+    # A tiny end castle behind the pole widens the shot into a whole goal area.
+    mascot.rect(grid, 12, 8, 15, 12, BRICK_DARK)
+    pixels(grid, ((12, 7), (13, 7), (15, 7)), BRICK)
+    mascot.rect(grid, 13, 10, 14, 12, INK)
+    mascot.rect(grid, 10, 1, 10, 12, CREAM)
+    coin(grid, 9, 0, shine=True)
+    fy = flag_y[i]
+    mascot.rect(grid, 7, fy, 9, fy + 2, PIPE)
+    pixels(grid, ((7, fy + 2), (8, fy + 3)), PIPE_DARK)
 
-    if i >= 2:
-      for number, (x, y) in enumerate(coin_seeds):
-        rise = (i - 2 + number) % 5
-        coin(grid, x, max(0, y - rise), shine=(i + number) % 2 == 0)
-      pixels(grid, ((8, 1 + i % 2), (15, 1), (6, 3), (14, 7)), MINT)
+    if i >= 3:
+      burst = i % 3
+      pixels(grid, (
+        (2, 1 + burst), (1, 2 + burst), (3, 2 + burst),
+        (6, burst), (5, 1 + burst), (7, 1 + burst),
+      ), AMBER if i % 2 else CREAM)
 
-    draw_player(
-      grid, 0, 7, jump=jumps[i], step=0,
-      hand_l=-2 if i >= 2 else 0, hand_r=-2 if i >= 2 else 0,
-      gaze=1, expression="happy" if i >= 2 else "open"
+    mario(
+      grid, xs[i], 6, jump=jumps[i], step=0,
+      pose="flag" if i >= 3 else "stand"
     )
     frames.append(grid)
   return frames, [180, 260, 100, 90, 190, 100, 120, 170, 180, 220]
 
 
 def error_frames():
-  """OUCH: a mischievous code bug bonks Claude and breaks a heart."""
+  """GAME OVER BEAT: a Goomba bonks Mario and his cap flies off."""
   bug_x = (10, 9, 8, 8, 9, 10, 10, 10)
   recoil = (0, 0, 1, 2, 1, 0, 0, 0)
   frames = []
   for i in range(8):
-    grid = mascot.blank(BG_ERROR if i not in (2, 3) else BG_ALERT_HOT)
-    ground(grid, danger=True, offset=i)
-    bug(grid, bug_x[i], 7, angry=i < 5, blink=i == 6)
+    grid = mascot.blank(SKY if i not in (2, 3) else BG_ALERT_HOT)
+    if i not in (2, 3):
+      clouds(grid, shift=0)
+    ground(grid, danger=False, offset=i)
+    goomba(grid, bug_x[i], 7, blink=i == 6)
     if i < 2:
       heart(grid, 4, 1, HOT)
     else:
       heart(grid, 4, 0, HOT, broken=True)
       pixels(grid, ((7, 6), (8, 5), (8, 7), (9, 6)), CREAM if i % 2 else AMBER)
-    draw_player(
-      grid, max(-1, 1 - recoil[i]), 7, jump=recoil[i],
-      hand_l=1 if i >= 2 else 0, hand_r=1 if i >= 2 else 0,
-      gaze=1, expression="x" if 2 <= i <= 5 else ("shock" if i == 1 else "open")
+      cap_x = min(12, 4 + i)
+      cap_y = max(0, 5 - (i - 2))
+      mascot.rect(grid, cap_x, cap_y, cap_x + 3, cap_y, CAP_RED)
+      mascot.rect(grid, cap_x + 2, cap_y + 1, cap_x + 4, cap_y + 1, CAP_RED)
+    mario(
+      grid, max(-1, 1 - recoil[i]), 6, jump=recoil[i],
+      cap=i < 2, pose="hurt" if i >= 2 else "stand"
     )
     frames.append(grid)
   return frames, [170, 110, 90, 210, 120, 180, 200, 220]
 
 
 def alerting2_frames():
-  """PLAYER NEEDED, NOW: the same gate, but lava rises and Claude panic-hops."""
+  """PLAYER NEEDED, NOW: the castle flashes while lava rises."""
   jumps = (0, 2, 3, 1, 0, 3, 2, 0)
   frames = []
   for i in range(8):
@@ -409,82 +436,65 @@ def alerting2_frames():
     gate(grid, glow=True)
     key(grid, 5, i % 2, CREAM if hot else HOT)
     pixels(grid, ((0, 1), (3, 0), (8, 4), (15, 1), (8, 7)), CREAM if hot else HOT)
-    draw_player(
-      grid, 0, 7, jump=jumps[i], step=0,
-      hand_l=-2, hand_r=-2, gaze=1, expression="shock"
-    )
+    mario(grid, 0, 6, jump=jumps[i], pose="wave")
     frames.append(grid)
   return frames, [95, 85, 110, 85, 95, 110, 85, 120]
 
 
 def alerting3_frames():
-  """BOSS ALERT: a giant bug guards the key while the whole level strobes."""
+  """BOWSER ALERT: the giant castle boss guards the key in a full strobe."""
   frames = []
   for i in range(6):
     hot = i % 2 == 0
     grid = mascot.blank(HOT if hot else BG_ALERT_COOL)
     ground(grid, danger=True, offset=i)
 
-    # The escalated alert swaps the door for its boss: one giant face, fangs,
-    # claws and the stolen key. It is loud, but still mischievous rather than
-    # grim, which keeps the desk companion cute.
-    boss = CREAM if hot else PINK
-    mascot.rect(grid, 8, 1, 15, 8, boss)
-    mascot.rect(grid, 9, 0, 14, 0, boss)
-    pixels(grid, ((7, 0), (8, 1), (15, 1), (7, 4), (15, 5)), boss)
-    mascot.rect(grid, 9, 3, 14, 6, CREAM if not hot else AMBER)
-    mascot.rect(grid, 9, 3, 10, 4, INK)
-    mascot.rect(grid, 13, 3, 14, 4, INK)
-    pixels(grid, ((10, 7), (11, 8), (13, 8), (14, 7)), INK)
-    key(grid, 10, 9, INK if hot else CREAM)
+    # Green turtle-dragon head, orange crown spikes, pale muzzle and fangs.
+    boss = CREAM if hot else TURTLE
+    mascot.rect(grid, 8, 2, 15, 9, boss)
+    pixels(grid, ((8, 1), (10, 0), (12, 1), (14, 0), (15, 1)), AMBER if hot else HOT)
+    pixels(grid, ((7, 2), (8, 3), (15, 3)), CREAM)
+    mascot.rect(grid, 9, 3, 10, 5, CREAM)
+    mascot.rect(grid, 13, 3, 14, 5, CREAM)
+    pixels(grid, ((10, 4), (13, 4)), INK)
+    mascot.rect(grid, 10, 6, 15, 9, AMBER if hot else CREAM)
+    pixels(grid, ((11, 7), (14, 7)), INK)
+    pixels(grid, ((10, 9), (12, 9), (14, 9)), INK)
+    key(grid, 10, 10, INK if hot else CREAM)
 
-    draw_player(
-      grid, 0, 7, jump=1 if i in (1, 4) else 0,
-      hand_l=-2, hand_r=-2, gaze=1,
-      expression="shock", body=CREAM if hot else BODY,
-      light=CREAM, dark=AMBER if hot else mascot.BODY_DARK
-    )
+    mario(grid, 0, 6, jump=1 if i in (1, 4) else 0, pose="wave")
     frames.append(grid)
   return frames, [90, 90, 90, 90, 90, 120]
 
 
 def compacting_frames():
-  """POWER CUBE: Claude pulls a lever while a crusher packs loose pixels."""
+  """WARP CLEANUP: loose context blocks spiral neatly into a green pipe."""
   frames = []
-  drops = (0, 1, 3, 5, 6, 5, 3, 1)
-  for i, drop in enumerate(drops):
-    grid = mascot.blank(BG_THINK)
+  paths = (
+    ((6, 1), (7, 2), (8, 3), (9, 4), (10, 5), (11, 6), (12, 7), (12, 8)),
+    ((12, 1), (13, 2), (14, 3), (14, 4), (13, 5), (12, 6), (12, 7), (12, 8)),
+    ((7, 5), (8, 5), (9, 5), (10, 6), (11, 6), (12, 7), (12, 8), (12, 8)),
+  )
+  for i in range(8):
+    grid = mascot.blank(SKY)
+    clouds(grid, shift=i // 3)
     ground(grid, offset=0)
 
-    # Crusher chamber, loose code blocks, then a bright single power cube at
-    # maximum compression.
-    mascot.rect(grid, 9, 3, 9, 12, GROUND_LIGHT)
-    mascot.rect(grid, 15, 3, 15, 12, GROUND_LIGHT)
-    mascot.rect(grid, 9, 11, 15, 12, GROUND)
-    if drop < 5:
-      mascot.rect(grid, 10, 7, 11, 8, CODE)
-      mascot.rect(grid, 13, 6, 14, 7, CODE_LIGHT)
-      mascot.rect(grid, 12, 9, 13, 10, CODE_DARK)
-    else:
-      mascot.rect(grid, 11, 9, 14, 11, CODE)
-      mascot.rect(grid, 12, 9, 13, 10, CREAM if i == 4 else CODE_LIGHT)
-      pixels(grid, ((10, 8), (15, 8), (10, 10)), MINT)
+    # Draw the loose blocks first, then the pipe lip over them so they visibly
+    # vanish down the opening instead of merely stopping above it.
+    for number, path in enumerate(paths):
+      x, y = path[(i + number * 2) % len(path)]
+      colour = (CODE, CODE_LIGHT, AMBER)[number]
+      mascot.rect(grid, x, y, x + 1, y + 1, colour)
+    pipe(grid, 10, 8, height=4)
+    pixels(grid, ((9, 7), (15, 7)), CREAM if i % 2 else PIPE_LIGHT)
 
-    head_y = 2 + drop
-    mascot.rect(grid, 11, 0, 13, max(0, head_y - 1), GROUND)
-    mascot.rect(grid, 10, head_y, 14, min(10, head_y + 1), CREAM if i == 4 else AMBER)
-
-    # Lever and knob visibly connect Claude's hand to the machine.
-    mascot.rect(grid, 8, 9, 8, 12, AMBER)
-    knob_y = 8 + (1 if i in (3, 4, 5) else 0)
-    mascot.rect(grid, 7, knob_y, 8, knob_y + 1, HOT)
-    draw_player(
-      grid, 0, 7, step=1 + i % 2,
-      hand_l=0, hand_r=-1 if i in (2, 3, 4, 5) else 0,
-      gaze=1, expression="happy" if i == 4 else "open"
-    )
+    # A blue P-switch gives Mario an obvious "tidy now" control.
+    mascot.rect(grid, 6, 9, 8, 12, OVERALL_BLUE)
+    mascot.rect(grid, 6, 9, 8, 9, CREAM if i in (3, 4) else CODE_LIGHT)
+    mario(grid, 0, 6, pose="read" if i in (3, 4) else "stand")
     frames.append(grid)
-  return frames, [150, 130, 110, 100, 260, 100, 120, 160]
+  return frames, [140, 130, 120, 110, 110, 120, 150, 200]
 
 
 def off_frames():
@@ -493,15 +503,15 @@ def off_frames():
 
 
 FACES = {
-  "thinking": (thinking_frames, "QUEST LOG -- reading a map, considering two routes"),
-  "working": (working_frames, "CODE DUNGEON -- hammering a glowing wall"),
-  "alerting": (alerting_frames, "PLAYER NEEDED -- waiting at a locked gate"),
-  "alerting2": (alerting2_frames, "PLAYER NEEDED -- lava rises at the gate"),
-  "alerting3": (alerting3_frames, "BOSS ALERT -- giant bug stole the key"),
-  "compacting": (compacting_frames, "POWER CUBE -- crushing loose pixels"),
-  "success": (success_frames, "LEVEL CLEAR -- treasure and coin shower"),
-  "error": (error_frames, "OUCH -- code bug broke a heart"),
-  "chilling": (chilling_frames, "SAVE POINT -- napping by the campfire"),
+  "thinking": (thinking_frames, "WORLD MAP -- quietly considering two routes"),
+  "working": (working_frames, "WORLD 1-1 -- running, jumping and bonking a block"),
+  "alerting": (alerting_frames, "PLAYER NEEDED -- key at the locked castle"),
+  "alerting2": (alerting2_frames, "PLAYER NEEDED -- castle flashes, lava rises"),
+  "alerting3": (alerting3_frames, "BOWSER ALERT -- full castle-boss strobe"),
+  "compacting": (compacting_frames, "WARP CLEANUP -- blocks disappear into a pipe"),
+  "success": (success_frames, "COURSE CLEAR -- flagpole and fireworks"),
+  "error": (error_frames, "BONK -- Goomba knocks off Mario's cap"),
+  "chilling": (chilling_frames, "1-UP REST STOP -- pipe, mushroom and a nap"),
   "off": (off_frames, "blank display"),
 }
 

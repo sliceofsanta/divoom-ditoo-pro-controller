@@ -414,6 +414,69 @@ impl Timings {
   }
 }
 
+/// A session whose state file has not been touched in this long is treated as
+/// gone. Without this a crashed session would pin the panel to "working"
+/// forever, and the display would be lying about work nobody is doing.
+const SESSION_STALE_AFTER: Duration = Duration::from_secs(900);
+
+/// How much a state deserves the panel when several sessions want it at once.
+///
+/// The ordering answers the question the display exists to answer: does
+/// anything need me? So a session blocked on input outranks every amount of
+/// busy work, and a failure outranks activity.
+fn priority(state: &str) -> u8 {
+  match state {
+    "alerting" => 100,
+    "error" => 90,
+    "compacting" => 70,
+    "working" => 60,
+    "thinking" => 50,
+    "success" => 40,
+    "chilling" => 10,
+    _ => 5
+  }
+}
+
+/// Merge the states several Claude Code sessions are asking for into the one
+/// the panel should show. Returns None when no session has anything to say.
+fn merge_sessions(states: &[(String, Duration)]) -> Option<String> {
+  states
+    .iter()
+    .filter(|(_, age)| *age < SESSION_STALE_AFTER)
+    .max_by_key(|(state, _)| priority(state))
+    .map(|(state, _)| state.clone())
+}
+
+/// Read each live session's requested state from `dir`, newest-first on ties.
+fn read_sessions(dir: &Path) -> Vec<(String, Duration)> {
+  let now = std::time::SystemTime::now();
+  let Ok(entries) = std::fs::read_dir(dir) else {
+    return Vec::new();
+  };
+  let mut out = Vec::new();
+  for entry in entries.flatten() {
+    let path = entry.path();
+    if !path.is_file() {
+      continue;
+    }
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+      continue;
+    };
+    let state = contents.trim().to_string();
+    if state.is_empty() {
+      continue;
+    }
+    let age = entry
+      .metadata()
+      .and_then(|m| m.modified())
+      .ok()
+      .and_then(|t| now.duration_since(t).ok())
+      .unwrap_or(Duration::ZERO);
+    out.push((state, age));
+  }
+  out
+}
+
 /// How many times the daemon will rebuild a dropped connection before giving
 /// up and letting the caller fall back to one-shot sends.
 const MAX_DAEMON_RECONNECTS: u32 = 5;
@@ -472,6 +535,7 @@ pub async fn run_status_daemon(
   );
 
   let applied_file = state_file.with_file_name("applied");
+  let sessions_dir = state_file.with_file_name("sessions");
   // `requested` is what the hooks asked for; `displayed` is the face actually
   // on the panel. They differ whenever a state is being presented over time --
   // an alert that has escalated, or a verdict that has decayed to idle.
@@ -551,11 +615,21 @@ pub async fn run_status_daemon(
           }
         }
 
-        let desired = std::fs::read_to_string(state_file)
-          .ok()
-          .map(|s| s.trim().to_string())
-          .filter(|s| !s.is_empty());
+        // Several Claude Code sessions can drive one panel. Each writes its
+        // own file; the highest-priority live one wins. A single state file is
+        // still honoured so the CLI and older setups keep working.
+        let sessions = read_sessions(&sessions_dir);
+        let desired = merge_sessions(&sessions).or_else(|| {
+          std::fs::read_to_string(state_file)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        });
         let Some(mut state) = desired else { continue };
+        if !sessions.is_empty() {
+          // Record what the merge decided, so `status` explains the panel.
+          let _ = std::fs::write(state_file, format!("{}\n", state));
+        }
 
         // The state names a file; refuse anything that could leave faces_dir.
         if !state.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
@@ -914,5 +988,58 @@ mod status_daemon_tests {
     std::fs::write(dir.join("alerting2.gif"), b"x").unwrap();
     assert!(face_path(&dir, "alerting2").unwrap().ends_with("alerting2.gif"));
     let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn the_session_that_needs_you_wins() {
+    let now = Duration::ZERO;
+    // A session blocked on input beats any amount of busy work elsewhere.
+    let states = vec![
+      ("working".to_string(), now),
+      ("alerting".to_string(), now),
+      ("thinking".to_string(), now)
+    ];
+    assert_eq!(merge_sessions(&states).as_deref(), Some("alerting"));
+  }
+
+  #[test]
+  fn failure_outranks_activity_but_not_a_block() {
+    let now = Duration::ZERO;
+    assert_eq!(
+      merge_sessions(&[("working".into(), now), ("error".into(), now)]).as_deref(),
+      Some("error")
+    );
+    assert_eq!(
+      merge_sessions(&[("error".into(), now), ("alerting".into(), now)]).as_deref(),
+      Some("alerting")
+    );
+  }
+
+  #[test]
+  fn idle_only_wins_when_everything_is_idle() {
+    let now = Duration::ZERO;
+    assert_eq!(
+      merge_sessions(&[("chilling".into(), now), ("thinking".into(), now)]).as_deref(),
+      Some("thinking")
+    );
+    assert_eq!(
+      merge_sessions(&[("chilling".into(), now), ("chilling".into(), now)]).as_deref(),
+      Some("chilling")
+    );
+  }
+
+  #[test]
+  fn a_dead_session_stops_holding_the_panel() {
+    // The whole point: a crashed session must not pin the display to "working"
+    // and make it lie about work nobody is doing.
+    let fresh = Duration::from_secs(1);
+    let dead = SESSION_STALE_AFTER + Duration::from_secs(1);
+    assert_eq!(
+      merge_sessions(&[("working".into(), dead), ("chilling".into(), fresh)]).as_deref(),
+      Some("chilling")
+    );
+    // Every session dead means nothing to show at all.
+    assert_eq!(merge_sessions(&[("alerting".into(), dead)]), None);
+    assert_eq!(merge_sessions(&[]), None);
   }
 }

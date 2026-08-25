@@ -1,31 +1,28 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into **Claude Quest**, a physical progress screen for
-[Claude Code](https://claude.com/claude-code). Instead of a row of abstract
-status portraits, the 16x16 display becomes one continuous tiny arcade world:
-Claude is the player, thinking is a quest map, work is a level, permissions are
-locked gates, bugs are literal bugs, and a finished turn earns the treasure
-chest.
+Turn a Divoom Ditoo Pro into a tiny **Super Mario progress world** for
+[Claude Code](https://claude.com/claude-code). Mario is the on-screen player,
+zoomed out to five pixels wide so the majority of every frame can show a
+recognisable level: blue skies, orange bricks, question blocks, coins, green
+pipes, Goombas, flagpoles, lava, castles and Bowser's boss arena.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | **QUEST LOG:** stays put, reads a map and considers two routes |
-| `working` | Claude runs a tool | **CODE DUNGEON:** hammers through a glowing code wall |
-| `compacting` | Claude compacts context | **POWER CUBE:** pulls the lever on a pixel crusher |
-| `alerting` | Claude needs your input | **PLAYER NEEDED:** waits at a locked gate for the key |
-| `alerting2` | still waiting after 1 minute | the same gate flashes faster and lava rises |
-| `alerting3` | still waiting after 5 minutes | **BOSS ALERT:** a giant code bug steals the key |
-| `success` | Claude finished responding | **LEVEL CLEAR:** chest opens, coins fly, Claude victory-jumps |
-| `error` | a tool or the turn failed | **OUCH:** a mischievous code bug bonks Claude and breaks a heart |
-| `chilling` | a session starts, or manual | **SAVE POINT:** naps beside a flickering campfire under the moon |
+| `thinking` | you submit a prompt | **WORLD MAP:** stays still, reads the map and considers two routes |
+| `working` | Claude runs a tool | **WORLD 1-1:** Mario runs, jumps, bonks a question block and releases a coin |
+| `compacting` | Claude compacts context | **WARP CLEANUP:** loose context blocks spiral into a green pipe |
+| `alerting` | Claude needs your input | **PLAYER NEEDED:** Mario waves at a locked brick castle and floating key |
+| `alerting2` | still waiting after 1 minute | the same castle flashes faster while lava rises |
+| `alerting3` | still waiting after 5 minutes | **BOWSER ALERT:** giant castle boss, stolen key and full-screen strobe |
+| `success` | Claude finished responding | **COURSE CLEAR:** Mario grabs the flagpole while fireworks burst |
+| `error` | a tool or the turn failed | **BONK:** a Goomba hits Mario and knocks off his cap |
+| `chilling` | a session starts, or manual | **1-UP REST STOP:** Mario naps beside a green pipe and mushroom under the moon |
 | `off` | the session ends, or manual | blank display |
 
-The mascot is built entirely from `<rect>` elements -- no paths, no curves --
-which is the happy reason he survives being squeezed onto 256 LEDs. The arcade
-player keeps the source `#DD775B`, cream face, bright top plane, dark side plane
-and four feet, but shrinks to seven columns so most of the screen can tell the
-story. Every prop is deliberately huge: quest map, hammer, gate, key,
-crusher, chest, bug and campfire all read from across a room.
+Mario is an original five-wide sprite drawn directly on the grid: red cap,
+warm face, black hair and moustache, red shirt, blue overalls and brown boots.
+It is intentionally smaller than the earlier Claude mascot so each animation
+reads as a complete Super Mario level rather than a close-up character portrait.
 
 The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
@@ -239,11 +236,10 @@ fallback if no GIF exists. `alerting2` and `alerting3` are the automatic
 one-minute and five-minute escalations used by the daemon.
 
 To edit the bundled ones, change the level scenes in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The player
-sprite lives in [`faces/mascot.py`](faces/mascot.py), posed by a handful of
-numbers: `x` and `y` place him in the level, `jump` lifts him, `step` selects a
-running-foot pair, `hand_l`/`hand_r` swing the hands, and `gaze`, `blink` and
-`expression` do the face:
+[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The compact
+`mario()` sprite is in the same file: `x` and `y` place him, `jump` lifts him,
+`step` selects a running-foot pair, and `pose` chooses standing, reading,
+waving, flag-grabbing or sleeping arms:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -259,15 +255,10 @@ props and sparks deliberately run on different beats. And every jump uses a
 short launch plus a held apex; evenly spaced positions look like teleportation
 at this scale.
 
-The file still includes the larger portrait rig, whose proportions come from
-the source SVG. The arcade scenes use `draw_player`, a purpose-built miniature
-that preserves Claude's four-foot silhouette while leaving roughly half of the
-matrix free for the current level event.
-
-The pose timing follows the weighted movement described in Codrops'
-[frame-by-frame mascot study](https://tympanus.net/codrops/2026/05/05/reverse-engineering-claude-ais-mascot-animations-with-svg-and-gsap/):
-limbs move as one beat, launch and landing use different timing, and the apex
-holds for a moment instead of sweeping evenly through the loop.
+The older Claude portrait rig remains in `mascot.py` as a reusable drawing
+primitive, but none of these nine animations uses it. The Mario sprite and
+level art are drawn from scratch rather than copied from a Nintendo sprite
+sheet.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you
@@ -305,9 +296,13 @@ failure is logged to `$DITOO_RUNDIR/log` and never disrupts Claude Code.
 - **The device cannot be a speaker while the daemon runs.** Opening the control
   channel requires dropping the audio link, so the daemon holds the device to
   itself. Run `stop` to hand it back.
-- **One display, several sessions.** Concurrent Claude Code windows all drive
-  the same device, last writer wins. The daemon at least makes them share one
-  connection; it does not merge their states.
+- **Several sessions share one panel sensibly.** Each Claude Code session
+  writes its own state file under `sessions/`, and the daemon shows the
+  highest-priority live one: `alerting` > `error` > `compacting` > `working` >
+  `thinking` > `success` > `chilling`. So a session blocked on you wins over
+  any amount of busy work elsewhere, which is the question the display exists
+  to answer. A session that dies stops counting after 15 minutes rather than
+  pinning the panel to work nobody is doing.
 - **~3 second lag without the daemon**, because each change connects afresh.
   With the daemon a change lands in well under a second -- every encoded face
   is under about 1.3 KB, so the transfer was never the bottleneck, the
