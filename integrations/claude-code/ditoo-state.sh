@@ -82,6 +82,21 @@ read_state_file() {
   cat "$1" 2>/dev/null || printf ''
 }
 
+# Lines in a file, or 0 if it does not exist.
+#
+# The existence check is not decoration: bash applies `< missing` BEFORE the
+# `2>/dev/null` on the same command, so the redirect failure reaches the real
+# stderr and a hook that is supposed to be silent starts printing at the user.
+count_lines() {
+  if [ ! -f "$1" ]; then
+    printf '0'
+    return 0
+  fi
+  local n
+  n="$(wc -l <"$1" 2>/dev/null | tr -d ' ')"
+  printf '%s' "${n:-0}"
+}
+
 # Claude Code puts the session id on stdin. Several sessions can drive one
 # panel, so each writes its own state file and the daemon merges them --
 # without this they overwrite each other and the display shows whichever
@@ -372,6 +387,33 @@ case "${1:-}" in
     fi
     exit 0
     ;;
+  fanout)
+    # Track a fan-out of parallel agents, drawn as pips along the top row.
+    #
+    # Counted by APPENDING a line per event and counting lines, not by
+    # incrementing a number in a file. Subagents start and finish concurrently,
+    # so read-modify-write would drop events under exactly the conditions this
+    # is meant to measure -- a wide fan-out. A single short append is atomic;
+    # two hooks racing both get counted.
+    case "${2:-}" in
+      start|done)
+        printf 'x\n' >> "$RUNDIR/fanout.${2}" 2>/dev/null
+        started="$(count_lines "$RUNDIR/fanout.start")"
+        finished="$(count_lines "$RUNDIR/fanout.done")"
+        if [ "$started" -gt 0 ]; then
+          printf '%s/%s\n' "$finished" "$started" > "$RUNDIR/fanout"
+        fi
+        ;;
+      clear)
+        # At the start of a turn: last turn's pips are not this turn's news.
+        rm -f "$RUNDIR/fanout" "$RUNDIR/fanout.start" "$RUNDIR/fanout.done" 2>/dev/null
+        ;;
+      *)
+        printf 'usage: %s fanout start|done|clear\n' "$(basename "$SELF")" >&2
+        exit 2 ;;
+    esac
+    exit 0
+    ;;
   number)
     # Show a number on the panel: test failures, agents running, anything
     # countable. Held until the next state change, like draw.
@@ -388,7 +430,7 @@ case "${1:-}" in
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|busy|meeting|off\n       %s alert  (reads a Notification payload on stdin)\n       %s number <0-99> | draw <image> | end | start | stop | status\n' "$(basename "$SELF")" "$(basename "$SELF")" "$(basename "$SELF")" >&2
+    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|busy|meeting|off\n       %s alert  (reads a Notification payload on stdin)\n       %s number <0-99> | fanout start|done|clear\n       %s draw <image> | end | start | stop | status\n' "$(basename "$SELF")" "$(basename "$SELF")" "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac

@@ -455,6 +455,93 @@ fn overlay_context_gauge(animation: &mut DivoomAnimation, percent: u8) {
   rebuild_palettes(animation);
 }
 
+/// Paint one pip per parallel agent along the TOP row: lit for finished, dim
+/// for still running.
+///
+/// Pips rather than a bar because the question a fan-out actually raises is
+/// "how many are left", and only a countable thing answers it -- a bar 60% full
+/// does not say whether that is three of five or six of ten. The bottom row is
+/// already the context gauge, so this takes the top and reads as a second
+/// channel rather than one longer bar.
+fn overlay_fanout_pips(animation: &mut DivoomAnimation, done: u32, total: u32) {
+  if total == 0 {
+    return;
+  }
+  let done = done.min(total);
+  // Past 16 the pips would be thinner than a pixel. Scale the pair down
+  // instead: the count stops being countable but the proportion stays honest.
+  // Rounded DOWN, so a fan-out never claims more progress than it has made.
+  let (done, slots) = if total > 16 {
+    ((done * 16) / total, 16)
+  } else {
+    (done, total)
+  };
+  // Same hue, two brightnesses, so the row reads as one filling meter rather
+  // than two unrelated colours. The running shade has to be unmistakably LIT,
+  // not merely darker than the finished one: the faces sit on a dark navy
+  // ground, and a dimmer first draft disappeared into it -- so a fan-out that
+  // had just started, the moment you most want to know five agents are out,
+  // looked exactly like no fan-out at all.
+  let finished = Rgb([80, 200, 255]);
+  let running = Rgb([55, 120, 165]);
+  for frame in &mut animation.frames {
+    // to_rgb8(), not as_mut_rgb8() -- see overlay_context_gauge.
+    let mut image = frame.image.to_rgb8();
+    for slot in 0..slots {
+      let start = (slot * 16) / slots;
+      let end = ((slot + 1) * 16) / slots;
+      // Hold back the last column of each pip as a divider so neighbours stay
+      // countable -- but only where there is room. At 16 slots every pip is a
+      // single pixel and a divider would erase it entirely.
+      let stop = if end - start > 1 { end - 1 } else { end };
+      let colour = if slot < done { finished } else { running };
+      for x in start..stop.min(16) {
+        image.put_pixel(x, 0, colour);
+      }
+    }
+    frame.image = DynamicImage::ImageRgb8(image);
+    frame.header.reuse_palette = false;
+  }
+  rebuild_palettes(animation);
+}
+
+/// Parse the fan-out file, which holds `done/total`.
+///
+/// Returns None for anything malformed rather than guessing: a wrong pip count
+/// is worse than none, because the whole point is that you can trust the count.
+fn parse_fanout(text: &str) -> Option<(u32, u32)> {
+  let (done, total) = text.trim().split_once('/')?;
+  let done: u32 = done.trim().parse().ok()?;
+  let total: u32 = total.trim().parse().ok()?;
+  if total == 0 {
+    return None;
+  }
+  Some((done.min(total), total))
+}
+
+/// Composite every enabled overlay onto an animation.
+///
+/// One call site per drawing path, so a new overlay is added in exactly one
+/// place and can never be wired into two of the three paths and forgotten in
+/// the third.
+fn apply_overlays(animation: &mut DivoomAnimation, overlays: &Overlays) {
+  if let Some(percent) = overlays.context {
+    overlay_context_gauge(animation, percent);
+  }
+  if let Some((done, total)) = overlays.fanout {
+    overlay_fanout_pips(animation, done, total);
+  }
+}
+
+/// The opt-in decorations drawn over whatever face is showing.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+struct Overlays {
+  /// Context window used, as a percentage. Bottom row.
+  context: Option<u8>,
+  /// Parallel agents, as (finished, total). Top row.
+  fanout: Option<(u32, u32)>
+}
+
 /// Recompute each frame's palette from its pixels. Needed after compositing,
 /// since `save_to_divoom_format` looks colours up in the palette and errors on
 /// any pixel it cannot find.
@@ -830,9 +917,12 @@ pub async fn run_status_daemon(
   // when the panel would otherwise be idle.
   let agenda_file = state_file.with_file_name("agenda");
   let number_file = state_file.with_file_name("number");
+  // Parallel agents, as "done/total", written by the SubagentStart and
+  // SubagentStop hooks.
+  let fanout_file = state_file.with_file_name("fanout");
   let mut last_agenda: Option<u32> = None;
   let run_dir = state_file.parent().unwrap_or(faces_dir);
-  let mut last_context: Option<u8> = None;
+  let mut last_overlays = Overlays::default();
   // `requested` is what the hooks asked for; `displayed` is the face actually
   // on the panel. They differ whenever a state is being presented over time --
   // an alert that has escalated, or a verdict that has decayed to idle.
@@ -951,16 +1041,22 @@ pub async fn run_status_daemon(
         }
         let timings = effective_timings(&timings, focus);
 
-        // Opt-in context gauge: a percentage written to this file paints a
-        // bar over the bottom row. Absent means the artwork is shown as drawn.
-        let context_percent = std::fs::read_to_string(&context_file)
-          .ok()
-          .and_then(|v| v.trim().parse::<u8>().ok());
-        if context_percent != last_context {
-          // The bar changed, so the panel has to be redrawn even if the state
-          // has not moved.
+        // Opt-in decorations. Both are absent by default, because the faces
+        // are drawn by hand and painting over a row of them should be the
+        // owner's decision rather than something that just happens.
+        let overlays = Overlays {
+          context: std::fs::read_to_string(&context_file)
+            .ok()
+            .and_then(|v| v.trim().parse::<u8>().ok()),
+          fanout: std::fs::read_to_string(&fanout_file)
+            .ok()
+            .and_then(|v| parse_fanout(&v))
+        };
+        if overlays != last_overlays {
+          // A decoration changed, so the panel has to be redrawn even though
+          // the state itself has not moved.
           displayed = None;
-          last_context = context_percent;
+          last_overlays = overlays;
         }
 
         // Drain anything the device sent us. Nothing else consumes this
@@ -1056,9 +1152,7 @@ pub async fn run_status_daemon(
               (Rgb([255, 90, 80]), Rgb([28, 2, 2]))
             };
             let mut animation = number_animation(value, ink, ground);
-            if let Some(percent) = context_percent {
-              overlay_context_gauge(&mut animation, percent);
-            }
+            apply_overlays(&mut animation, &overlays);
             let mut buf = Vec::new();
             if animation.save_to_divoom_format(&mut buf).is_ok() {
               let mut failed = false;
@@ -1089,9 +1183,7 @@ pub async fn run_status_daemon(
           if let Some(minutes) = agenda {
             let Some(active) = connection.as_mut() else { continue };
             let mut animation = countdown_animation(minutes);
-            if let Some(percent) = context_percent {
-              overlay_context_gauge(&mut animation, percent);
-            }
+            apply_overlays(&mut animation, &overlays);
             let mut buf = Vec::new();
             if animation.save_to_divoom_format(&mut buf).is_ok() {
               let mut failed = false;
@@ -1128,7 +1220,7 @@ pub async fn run_status_daemon(
         let Some(active) = connection.as_mut() else {
           continue;
         };
-        match send_state(active, &path, context_percent).await {
+        match send_state(active, &path, &overlays).await {
           Ok(()) => {
             info!("Applied state {}", face);
             consecutive_failures = 0;
@@ -1183,7 +1275,7 @@ fn face_path(dirs: &[&Path], state: &str) -> Option<std::path::PathBuf> {
 async fn send_state(
   conn: &mut DeviceConnection,
   path: &Path,
-  context_percent: Option<u8>
+  overlays: &Overlays
 ) -> Result<(), Box<dyn Error>> {
   let animation = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif")) {
     DivoomAnimation::from_gif(&mut BufReader::new(File::open(path)?))?
@@ -1191,9 +1283,7 @@ async fn send_state(
     DivoomAnimation::from_image(image::open(path)?)?
   };
   let mut animation = animation;
-  if let Some(percent) = context_percent {
-    overlay_context_gauge(&mut animation, percent);
-  }
+  apply_overlays(&mut animation, overlays);
   let mut buf = Vec::new();
   animation.save_to_divoom_format(&mut buf)?;
   for packet in create_network_packets_from(&buf)? {
@@ -1567,6 +1657,112 @@ mod status_daemon_tests {
     // new colours and the whole send fails.
     let mut buf = Vec::new();
     build(50).save_to_divoom_format(&mut buf).expect("composited frame must still encode");
+    assert!(!buf.is_empty());
+  }
+
+  /// A one-frame animation of a single colour, for testing what an overlay
+  /// paints without a real face underneath it.
+  fn solid_animation(colour: Rgb<u8>) -> DivoomAnimation {
+    use crate::divoom_file_format::frame::Frame;
+    use crate::divoom_file_format::frame_header::FrameHeader;
+    use image::RgbImage;
+    DivoomAnimation {
+      frames: vec![Frame {
+        header: FrameHeader {
+          time_in_milliseconds: 100,
+          reuse_palette: false,
+          color_count: 1
+        },
+        palette: vec![colour],
+        local_palette: vec![colour],
+        image: DynamicImage::ImageRgb8(RgbImage::from_pixel(16, 16, colour))
+      }]
+    }
+  }
+
+  #[test]
+  fn a_malformed_fanout_draws_nothing_rather_than_guessing() {
+    assert_eq!(parse_fanout("3/5"), Some((3, 5)));
+    assert_eq!(parse_fanout(" 0 / 8 \n"), Some((0, 8)));
+    // More finished than started: clamp instead of overflowing the row.
+    assert_eq!(parse_fanout("9/4"), Some((4, 4)));
+    for junk in ["", "5", "a/b", "3/0", "3/", "/5", "-1/5"] {
+      assert_eq!(parse_fanout(junk), None, "{:?} should draw nothing", junk);
+    }
+  }
+
+  #[test]
+  fn pips_stay_countable_and_never_overstate_progress() {
+    let lit_pips = |done: u32, total: u32| {
+      let mut animation = solid_animation(Rgb([0, 0, 0]));
+      overlay_fanout_pips(&mut animation, done, total);
+      let row = animation.frames[0].image.to_rgb8();
+      // Count RUNS of bright pixels, not bright pixels: that is what a person
+      // counting pips across the room is actually doing.
+      let bright = |x: u32| row.get_pixel(x, 0)[1] > 160;
+      (0..16).filter(|x| bright(*x) && (*x == 0 || !bright(x - 1))).count()
+    };
+
+    assert_eq!(lit_pips(0, 5), 0, "nothing finished, nothing lit");
+    assert_eq!(lit_pips(3, 5), 3);
+    assert_eq!(lit_pips(5, 5), 5, "a finished fan-out lights every pip");
+    assert_eq!(lit_pips(1, 2), 1);
+
+    // Above 16 the pips stop being countable, so the promise weakens to "never
+    // claims more progress than there is".
+    let mut animation = solid_animation(Rgb([0, 0, 0]));
+    overlay_fanout_pips(&mut animation, 49, 50);
+    let row = animation.frames[0].image.to_rgb8();
+    let lit = (0..16).filter(|x| row.get_pixel(*x, 0)[1] > 160).count();
+    assert!(lit < 16, "49 of 50 must not look complete, got {}/16", lit);
+
+    // A fan-out with nothing finished yet must still be VISIBLE. This is the
+    // regression that a purely "is it lit" test misses: the first draft's
+    // running shade was darker than the artwork it sat on, so a just-started
+    // fan-out looked identical to no fan-out.
+    let mut fresh = solid_animation(Rgb([30, 35, 50])); // the faces' ground
+    overlay_fanout_pips(&mut fresh, 0, 4);
+    let row = fresh.frames[0].image.to_rgb8();
+    let ground = 30u32 + 35 + 50;
+    let visible = (0..16)
+      .filter(|x| {
+        let p = row.get_pixel(*x, 0);
+        p[0] as u32 + p[1] as u32 + p[2] as u32 > ground * 2
+      })
+      .count();
+    assert!(visible >= 8, "a fan-out with nothing done must still show, got {}", visible);
+
+    // Zero total is "no fan-out", not "an empty one" -- it must not paint.
+    let mut untouched = solid_animation(Rgb([9, 9, 9]));
+    overlay_fanout_pips(&mut untouched, 0, 0);
+    assert_eq!(*untouched.frames[0].image.to_rgb8().get_pixel(0, 0), Rgb([9, 9, 9]));
+  }
+
+  #[test]
+  fn the_two_overlays_share_a_face_without_erasing_each_other() {
+    let face = std::path::Path::new("integrations/claude-code/faces/working.gif");
+    if !face.exists() {
+      return; // faces are user-supplied; skip rather than fail the suite
+    }
+    let mut animation = DivoomAnimation::from_gif(
+      &mut BufReader::new(File::open(face).unwrap())
+    ).unwrap();
+    apply_overlays(
+      &mut animation,
+      &Overlays { context: Some(100), fanout: Some((2, 4)) }
+    );
+    let image = animation.frames[0].image.to_rgb8();
+    let gauge = (0..16).filter(|x| image.get_pixel(*x, 15)[0] > 140).count();
+    let pips = (0..16).filter(|x| image.get_pixel(*x, 0)[1] > 160).count();
+    assert!(gauge >= 14, "the gauge still owns the bottom row, got {}", gauge);
+    assert!(pips > 0, "the pips still own the top row");
+
+    // The real failure mode: compositing twice leaves a pixel outside the
+    // rebuilt palette and the encode dies with "Pixel not found in palette".
+    let mut buf = Vec::new();
+    animation
+      .save_to_divoom_format(&mut buf)
+      .expect("both overlays composited must still encode");
     assert!(!buf.is_empty());
   }
 
