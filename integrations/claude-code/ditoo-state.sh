@@ -219,6 +219,13 @@ case "${1:-}" in
     run_worker
     exit 0
     ;;
+  end)
+    # A session that has finished must stop voting. Without this its last state
+    # sits in the merge until it ages out, so a window closed while "working"
+    # keeps the panel busy for a quarter of an hour after the work stopped.
+    rm -f "$SESSIONS/$(session_id)" 2>/dev/null
+    exit 0
+    ;;
   draw)
     # Show an arbitrary image. Copied into the run directory rather than the
     # faces directory, which belongs to whoever drew the faces; the daemon
@@ -323,7 +330,7 @@ case "${1:-}" in
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|off|draw <image>|start|stop|status\n' "$(basename "$SELF")" >&2
+    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|off|draw <image>|end|start|stop|status\n' "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac

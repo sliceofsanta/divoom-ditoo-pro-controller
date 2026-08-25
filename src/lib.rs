@@ -683,6 +683,34 @@ pub async fn run_status_daemon(
           }
         }
 
+        // Opt-in context gauge: a percentage written to this file paints a
+        // bar over the bottom row. Absent means the artwork is shown as drawn.
+        let context_percent = std::fs::read_to_string(&context_file)
+          .ok()
+          .and_then(|v| v.trim().parse::<u8>().ok());
+        if context_percent != last_context {
+          // The bar changed, so the panel has to be redrawn even if the state
+          // has not moved.
+          displayed = None;
+          last_context = context_percent;
+        }
+
+        // Drain anything the device sent us. Nothing else consumes this
+        // channel in daemon mode, so skipping it leaks for the daemon's whole
+        // lifetime. It is also the only chance to observe the device's
+        // unsolicited frames -- command 0xF7 shows up unprompted and nobody
+        // has worked out what it means.
+        if let Some(active) = connection.as_mut() {
+          for response in active.drain_responses() {
+            info!(
+              "Unsolicited frame: command 0x{:02x} ack={} data={}",
+              response.original_command,
+              response.ack,
+              hex::encode(&response.data)
+            );
+          }
+        }
+
         // Several Claude Code sessions can drive one panel. Each writes its
         // own file; the highest-priority live one wins. A single state file is
         // still honoured so the CLI and older setups keep working.
@@ -728,36 +756,11 @@ pub async fn run_status_daemon(
         // happen with the state file sitting still.
         let face = present(&requested, now.duration_since(requested_since), &timings).to_string();
         if displayed.as_deref() == Some(face.as_str()) {
+          // Nothing to redraw. Anything that must happen EVERY tick -- draining
+          // the device's channel, noticing a context change -- has to run
+          // before this point, or it only ever runs when the state moves.
           continue;
         }
-        // Opt-in context gauge: a percentage written to this file paints a
-        // bar over the bottom row. Absent means the artwork is shown as drawn.
-        let context_percent = std::fs::read_to_string(&context_file)
-          .ok()
-          .and_then(|v| v.trim().parse::<u8>().ok());
-        if context_percent != last_context {
-          // The bar changed, so the panel has to be redrawn even if the state
-          // has not moved.
-          displayed = None;
-          last_context = context_percent;
-        }
-
-        // Drain anything the device sent us. Nothing else consumes this
-        // channel in daemon mode, so skipping it leaks for the daemon's whole
-        // lifetime. It is also the only chance to observe the device's
-        // unsolicited frames -- command 0xF7 shows up unprompted and nobody
-        // has worked out what it means.
-        if let Some(active) = connection.as_mut() {
-          for response in active.drain_responses() {
-            info!(
-              "Unsolicited frame: command 0x{:02x} ack={} data={}",
-              response.original_command,
-              response.ack,
-              hex::encode(&response.data)
-            );
-          }
-        }
-
         // Resolve the image BEFORE touching the connection: a missing face is
         // a content problem and must not cost a healthy link.
         // The run directory is searched first so ad-hoc art (`draw`) can
