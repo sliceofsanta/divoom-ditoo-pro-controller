@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Generate Claude Quest, a tiny 16x16 status arcade game for Ditoo Pro.
+"""Generate Super Claude Bros., a tiny 16x16 status game for Ditoo Pro.
 
 Every Claude Code state is another scene in the same miniature platformer:
 
-    thinking    Claude quietly studies a quest map and considers two routes
-    working     Claude hammers through a glowing wall of code
-    alerting    a locked gate waits for the player's key
-    compacting  a pixel crusher packs loose context into one power cube
-    success     the treasure chest opens and showers Claude with coins
-    error       a mischievous bug steals a heart
-    chilling    Claude naps beside the save-point campfire
+    thinking    Claude studies a level map without moving
+    working     Claude runs through bricks, coins and a warp pipe
+    alerting    a castle door waits for the player's key
+    compacting  loose code blocks disappear into a warp pipe
+    success     Claude grabs the flagpole under fireworks
+    error       a Goomba-like bug bonks Claude and knocks off his cap
+    chilling    Claude naps on a warp pipe beside a mushroom
 
 The mascot becomes a real player sprite instead of occupying the entire panel.
 That leaves enough room for platforms, enemies, machines and oversized props,
@@ -32,16 +32,18 @@ import mascot
 from mascot import BODY, SIZE, draw_player
 from gifwriter import write_gif
 
-# One dark arcade world, tinted by the current event. Near-black skies keep the
-# tiny player and props bright on the real LEDs without turning the full panel
-# into a flashlight.
-BG_CHILL = (2, 8, 18)
-BG_THINK = (7, 6, 24)
-BG_WORK = (0, 8, 18)
-BG_ALERT_HOT = (62, 5, 4)
-BG_ALERT_COOL = (24, 0, 10)
-BG_SUCCESS = (0, 16, 13)
-BG_ERROR = (26, 0, 9)
+# A deliberately recognisable 8-bit plumber palette: blue overworld sky,
+# orange bricks, green pipes, gold blocks and high-contrast red danger scenes.
+SKY = (28, 106, 190)
+SKY_LIGHT = (102, 193, 242)
+NIGHT = (8, 18, 58)
+BG_CHILL = NIGHT
+BG_THINK = SKY
+BG_WORK = SKY
+BG_ALERT_HOT = (118, 21, 20)
+BG_ALERT_COOL = (24, 31, 80)
+BG_SUCCESS = SKY
+BG_ERROR = (48, 15, 48)
 
 INK = (17, 14, 18)
 CODE_DARK = (26, 76, 129)
@@ -56,6 +58,17 @@ PURPLE = (157, 91, 230)
 GROUND_DARK = (8, 21, 42)
 GROUND = (22, 54, 84)
 GROUND_LIGHT = (43, 104, 134)
+CAP_RED = (232, 48, 42)
+OVERALL_BLUE = (30, 74, 178)
+BRICK_DARK = (108, 45, 32)
+BRICK = (194, 82, 47)
+BRICK_LIGHT = (255, 153, 64)
+PIPE_DARK = (0, 91, 52)
+PIPE = (34, 177, 76)
+PIPE_LIGHT = (130, 232, 102)
+LAVA = (245, 51, 35)
+LAVA_LIGHT = (255, 194, 55)
+TURTLE = (91, 190, 74)
 
 
 def pixels(grid, points, colour):
@@ -64,15 +77,69 @@ def pixels(grid, points, colour):
 
 
 def ground(grid, danger=False, offset=0):
-  """A scrolling two-row arcade platform shared by every playable scene."""
-  edge = HOT if danger else GROUND_LIGHT
-  fill = (82, 20, 30) if danger else GROUND
-  dark = (43, 7, 17) if danger else GROUND_DARK
+  """Classic brick floor, or animated lava for urgent/error scenes."""
+  edge = LAVA_LIGHT if danger else BRICK_LIGHT
+  fill = LAVA if danger else BRICK
+  dark = BRICK_DARK
   mascot.rect(grid, 0, 13, 15, 13, edge)
   mascot.rect(grid, 0, 14, 15, 15, fill)
   for x in range(-2 + offset % 4, 18, 4):
     mascot.rect(grid, x, 14, x + 1, 14, dark)
     mascot.px(grid, x + 2, 15, dark)
+
+
+def clouds(grid, shift=0, night=False):
+  colour = CODE_DARK if night else CREAM
+  for origin in (-4 + shift % 12, 8 + shift % 12):
+    pixels(grid, (
+      (origin, 2), (origin + 1, 1), (origin + 2, 1),
+      (origin + 3, 2), (origin + 4, 2), (origin + 1, 2), (origin + 2, 2),
+    ), colour)
+
+
+def hero(grid, x, y, **pose):
+  """Claude in a red cap and blue overalls: mascot first, plumber second."""
+  draw_player(grid, x, y, hat=CAP_RED, overalls=OVERALL_BLUE, **pose)
+
+
+def question_block(grid, x, y, flash=False, empty=False):
+  face = BRICK if empty else (CREAM if flash else AMBER)
+  mascot.rect(grid, x, y, x + 4, y + 4, BRICK_DARK)
+  mascot.rect(grid, x, y, x + 3, y + 3, face)
+  pixels(grid, ((x, y), (x + 3, y), (x, y + 3), (x + 3, y + 3)), BRICK_LIGHT)
+  if not empty:
+    pixels(grid, (
+      (x + 1, y + 1), (x + 2, y + 1),
+      (x + 2, y + 2), (x + 1, y + 3),
+    ), INK)
+
+
+def pipe(grid, x, y, height=5):
+  bottom = min(12, y + height)
+  mascot.rect(grid, x + 1, y + 2, x + 4, bottom, PIPE_DARK)
+  mascot.rect(grid, x + 2, y + 2, x + 3, bottom, PIPE)
+  mascot.rect(grid, x, y, x + 5, y + 2, PIPE_DARK)
+  mascot.rect(grid, x + 1, y, x + 4, y + 1, PIPE)
+  mascot.rect(grid, x + 2, y, x + 2, y + 1, PIPE_LIGHT)
+
+
+def goomba(grid, x, y, blink=False):
+  """Original squat mushroom bug, using the iconic enemy silhouette."""
+  mascot.rect(grid, x + 1, y + 1, x + 4, y + 4, BRICK_DARK)
+  mascot.rect(grid, x + 2, y, x + 3, y, BRICK_LIGHT)
+  pixels(grid, ((x, y + 2), (x + 5, y + 2), (x, y + 5), (x + 5, y + 5)), BRICK_DARK)
+  if blink:
+    pixels(grid, ((x + 1, y + 2), (x + 4, y + 2)), INK)
+  else:
+    pixels(grid, ((x + 1, y + 2), (x + 4, y + 2)), CREAM)
+    pixels(grid, ((x + 2, y + 3), (x + 3, y + 3)), INK)
+
+
+def mushroom(grid, x, y, colour=CAP_RED):
+  pixels(grid, ((x + 1, y), (x + 2, y), (x, y + 1), (x + 3, y + 1)), colour)
+  mascot.rect(grid, x, y + 2, x + 3, y + 2, CREAM)
+  mascot.rect(grid, x + 1, y + 3, x + 2, y + 4, CREAM)
+  pixels(grid, ((x + 1, y + 1), (x + 3, y + 1)), CREAM)
 
 
 def heart(grid, x, y, colour=HOT, broken=False):
@@ -120,14 +187,16 @@ def bug(grid, x, y, angry=False, blink=False, colour=PINK):
 
 
 def gate(grid, glow=False):
-  colour = CREAM if glow else AMBER
-  mascot.rect(grid, 10, 4, 15, 5, colour)
-  mascot.rect(grid, 10, 4, 11, 12, colour)
-  mascot.rect(grid, 14, 4, 15, 12, colour)
-  mascot.rect(grid, 12, 6, 12, 12, colour)
-  mascot.rect(grid, 9, 9, 13, 11, INK)
-  mascot.rect(grid, 10, 9, 12, 10, HOT if glow else mascot.BODY_DARK)
-  mascot.px(grid, 11, 11, HOT if glow else CREAM)
+  """Brick castle with a giant keyhole door."""
+  stone = CREAM if glow else BRICK
+  mascot.rect(grid, 9, 4, 15, 12, BRICK_DARK)
+  pixels(grid, ((9, 3), (10, 3), (12, 3), (13, 3), (15, 3)), stone)
+  mascot.rect(grid, 10, 4, 15, 7, stone)
+  pixels(grid, ((11, 5), (14, 5), (10, 7), (13, 7)), BRICK_LIGHT)
+  mascot.rect(grid, 10, 8, 14, 12, INK)
+  mascot.rect(grid, 11, 8, 13, 8, mascot.BODY_DARK)
+  mascot.rect(grid, 11, 10, 13, 11, HOT if glow else AMBER)
+  mascot.px(grid, 12, 12, HOT if glow else CREAM)
 
 
 def thinking_frames():

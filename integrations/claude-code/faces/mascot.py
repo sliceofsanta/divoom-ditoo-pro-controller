@@ -123,7 +123,7 @@ def draw(bg, body_y=3, body_h=7, legs=(0, 0, 0, 0), hand_l=0, hand_r=0,
 
 def draw_player(grid, x, y, jump=0, step=0, hand_l=0, hand_r=0,
                 gaze=0, blink=False, expression="open", body=BODY,
-                dark=BODY_DARK, light=BODY_LIGHT):
+                dark=BODY_DARK, light=BODY_LIGHT, hat=None, overalls=None):
   """Draw the mascot as a tiny arcade player inside an existing scene.
 
   The portrait rig above is for close-ups. This seven-column player sprite is
@@ -170,6 +170,16 @@ def draw_player(grid, x, y, jump=0, step=0, hand_l=0, hand_r=0,
     px(grid, x + 4 + eye_shift, top + 3, EYE)
     if expression == "shock":
       px(grid, x + 3, top + 4, EYE)
+
+  # Optional plumber costume. The cap deliberately sits outside the normal
+  # silhouette, with a pale badge and long brim; blue overalls only cover the
+  # bottom plane so Claude's terracotta block body remains unmistakable.
+  if hat is not None:
+    rect(grid, x + 1, top - 1, x + 5, top - 1, hat)
+    rect(grid, x + 3, top, x + 7, top, hat)
+    px(grid, x + 3, top - 1, FACE_LIGHT)
+  if overalls is not None:
+    rect(grid, x + 2, top + 5, x + 4, top + 5, overalls)
 
   # Hands can rise, fall or disappear behind a prop.
   if hand_l is not None:

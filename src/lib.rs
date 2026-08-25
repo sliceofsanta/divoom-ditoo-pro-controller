@@ -464,7 +464,7 @@ pub async fn run_status_daemon(
   state_file: &Path,
   faces_dir: &Path
 ) -> Result<(), Box<dyn Error>> {
-  let mut conn = DeviceConnection::connect(mac_address).await?;
+  let conn = DeviceConnection::connect(mac_address).await?;
   info!(
     "Status daemon connected; watching {} for states from {}",
     state_file.display(),
@@ -488,9 +488,17 @@ pub async fn run_status_daemon(
   let mut worked_for = Duration::ZERO;
   let timings = Timings::from_env();
   // A held connection can be torn down underneath us -- macOS re-attaching the
-  // audio profile shows up as kIOReturnNotOpen on the next write. Reconnecting
-  // costs one chime; dying costs the whole feature until someone notices.
+  // audio profile shows up as kIOReturnNotOpen on the next write, and after a
+  // long idle the whole host connection can go. Reconnecting costs one chime;
+  // dying costs the whole feature until someone notices the panel is stale.
+  //
+  // The connection is an Option so that a FAILED reconnect is just "no
+  // connection yet, try again next tick" instead of ending the daemon. Getting
+  // this wrong is subtle: an earlier version propagated the reconnect error
+  // with `?`, so the five-attempt budget never survived past attempt one.
+  let mut connection = Some(conn);
   let mut consecutive_failures = 0u32;
+  let mut retry_at: Option<tokio::time::Instant> = None;
   debug!("Status daemon timings: {:?}", timings);
   let mut poll = tokio::time::interval(Duration::from_millis(250));
 
@@ -507,6 +515,42 @@ pub async fn run_status_daemon(
   loop {
     tokio::select! {
       _ = poll.tick() => {
+        // Rebuild a lost connection before doing anything else. Backoff grows
+        // with consecutive failures so a device that is off or out of range is
+        // not hammered.
+        if connection.is_none() {
+          let now = tokio::time::Instant::now();
+          if retry_at.is_some_and(|at| now < at) {
+            continue;
+          }
+          consecutive_failures += 1;
+          if consecutive_failures > MAX_DAEMON_RECONNECTS {
+            return Err(format!(
+              "Giving up after {} failed reconnects", MAX_DAEMON_RECONNECTS
+            ).into());
+          }
+          info!(
+            "Reconnecting (attempt {}/{})",
+            consecutive_failures, MAX_DAEMON_RECONNECTS
+          );
+          match DeviceConnection::connect(mac_address).await {
+            Ok(fresh) => {
+              info!("Status daemon reconnected");
+              connection = Some(fresh);
+              retry_at = None;
+              displayed = None;
+            }
+            Err(e) => {
+              let backoff = Duration::from_secs(
+                2u64.saturating_pow(consecutive_failures.min(5))
+              );
+              info!("Reconnect failed ({}); next try in {:?}", e, backoff);
+              retry_at = Some(now + backoff);
+              continue;
+            }
+          }
+        }
+
         let desired = std::fs::read_to_string(state_file)
           .ok()
           .map(|s| s.trim().to_string())
@@ -544,7 +588,17 @@ pub async fn run_status_daemon(
         if displayed.as_deref() == Some(face.as_str()) {
           continue;
         }
-        match send_state(&mut conn, faces_dir, &face).await {
+        // Resolve the image BEFORE touching the connection: a missing face is
+        // a content problem and must not cost a healthy link.
+        let Some(path) = face_path(faces_dir, &face) else {
+          info!("No image for state {} in {}", face, faces_dir.display());
+          displayed = Some(face);
+          continue;
+        };
+        let Some(active) = connection.as_mut() else {
+          continue;
+        };
+        match send_state(active, &path).await {
           Ok(()) => {
             info!("Applied state {}", face);
             consecutive_failures = 0;
@@ -552,23 +606,11 @@ pub async fn run_status_daemon(
             displayed = Some(face);
           }
           Err(e) => {
-            consecutive_failures += 1;
-            if consecutive_failures > MAX_DAEMON_RECONNECTS {
-              conn.disconnect().await.ok();
-              return Err(format!(
-                "Failed to apply state {} after {} reconnects: {}",
-                face, MAX_DAEMON_RECONNECTS, e
-              ).into());
+            info!("Send failed ({}); dropping the connection to rebuild it", e);
+            if let Some(dead) = connection.take() {
+              dead.disconnect().await.ok();
             }
-            info!(
-              "Send failed ({}); reconnecting (attempt {}/{})",
-              e, consecutive_failures, MAX_DAEMON_RECONNECTS
-            );
-            conn.disconnect().await.ok();
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            conn = DeviceConnection::connect(mac_address).await?;
-            // The panel may be showing anything now, so forget what we thought
-            // was on it and let the next tick re-send.
+            // Rebuilt on a later tick by the block at the top of the loop.
             displayed = None;
           }
         }
@@ -584,42 +626,36 @@ pub async fn run_status_daemon(
     }
   }
 
-  conn.disconnect().await?;
+  if let Some(active) = connection {
+    active.disconnect().await?;
+  }
   Ok(())
 }
 
-async fn send_state(
-  conn: &mut DeviceConnection,
-  faces_dir: &Path,
-  state: &str
-) -> Result<(), Box<dyn Error>> {
-  // Escalated variants are numbered (alerting2, alerting3). If one is missing
-  // -- an older faces directory, say -- fall back to the base face rather than
-  // failing and killing the connection.
+/// Find the image for a state. Escalated variants are numbered
+/// (alerting2, alerting3); if one is missing -- an older faces directory, say
+/// -- fall back to the base face.
+fn face_path(faces_dir: &Path, state: &str) -> Option<std::path::PathBuf> {
   let base = state.trim_end_matches(|c: char| c.is_ascii_digit());
-  let mut path = None;
   for name in [state, base] {
     for ext in ["gif", "png"] {
       let candidate = faces_dir.join(format!("{}.{}", name, ext));
       if candidate.exists() {
-        path = Some(candidate);
-        break;
+        return Some(candidate);
       }
     }
-    if path.is_some() {
-      break;
-    }
   }
-  let Some(path) = path else {
-    return Err(
-      format!("no face image for state '{}' in {}", state, faces_dir.display()).into()
-    );
-  };
+  None
+}
 
+async fn send_state(
+  conn: &mut DeviceConnection,
+  path: &Path
+) -> Result<(), Box<dyn Error>> {
   let animation = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif")) {
-    DivoomAnimation::from_gif(&mut BufReader::new(File::open(&path)?))?
+    DivoomAnimation::from_gif(&mut BufReader::new(File::open(path)?))?
   } else {
-    DivoomAnimation::from_image(image::open(&path)?)?
+    DivoomAnimation::from_image(image::open(path)?)?
   };
   let mut buf = Vec::new();
   animation.save_to_divoom_format(&mut buf)?;
@@ -853,5 +889,30 @@ mod status_daemon_tests {
     assert_eq!(resolved, "chilling");
     assert_ne!(resolved, raw, "resolution rewrote the state, so the raw value \
                                must be what the loop compares against");
+  }
+
+  #[test]
+  fn face_resolution_falls_back_from_numbered_variants() {
+    let dir = std::env::temp_dir().join("ditoo_face_test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("alerting.gif"), b"x").unwrap();
+    std::fs::write(dir.join("chilling.png"), b"x").unwrap();
+
+    // exact match wins
+    assert!(face_path(&dir, "alerting").unwrap().ends_with("alerting.gif"));
+    // a numbered variant with no file of its own falls back to the base face,
+    // so an older faces directory degrades instead of failing
+    assert!(face_path(&dir, "alerting2").unwrap().ends_with("alerting.gif"));
+    assert!(face_path(&dir, "alerting3").unwrap().ends_with("alerting.gif"));
+    // png is accepted when there is no gif
+    assert!(face_path(&dir, "chilling").unwrap().ends_with("chilling.png"));
+    // genuinely absent stays absent -- the caller skips without touching the link
+    assert!(face_path(&dir, "nonexistent").is_none());
+
+    // an exact numbered file takes precedence over the fallback
+    std::fs::write(dir.join("alerting2.gif"), b"x").unwrap();
+    assert!(face_path(&dir, "alerting2").unwrap().ends_with("alerting2.gif"));
+    let _ = std::fs::remove_dir_all(&dir);
   }
 }
