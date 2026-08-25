@@ -380,7 +380,10 @@ pub struct Timings {
   pub transient: Duration,
   /// A celebration has to be earned or it stops meaning anything. A turn that
   /// finishes in seconds just goes quietly idle.
-  pub celebrate_after: Duration
+  pub celebrate_after: Duration,
+  /// How long the panel sits idle before falling through to `screensaver`, if
+  /// such a face exists. Zero disables it.
+  pub screensaver_after: Duration
 }
 
 impl Default for Timings {
@@ -389,7 +392,8 @@ impl Default for Timings {
       alert_escalate: Duration::from_secs(60),
       alert_panic: Duration::from_secs(300),
       transient: Duration::from_secs(6),
-      celebrate_after: Duration::from_secs(600)
+      celebrate_after: Duration::from_secs(600),
+      screensaver_after: Duration::from_secs(1800)
     }
   }
 }
@@ -410,7 +414,8 @@ impl Timings {
       alert_escalate: secs("DITOO_ALERT_ESCALATE_SECS", base.alert_escalate),
       alert_panic: secs("DITOO_ALERT_PANIC_SECS", base.alert_panic),
       transient: secs("DITOO_TRANSIENT_SECS", base.transient),
-      celebrate_after: secs("DITOO_CELEBRATE_AFTER_SECS", base.celebrate_after)
+      celebrate_after: secs("DITOO_CELEBRATE_AFTER_SECS", base.celebrate_after),
+      screensaver_after: secs("DITOO_SCREENSAVER_AFTER_SECS", base.screensaver_after)
     }
   }
 }
@@ -560,6 +565,13 @@ fn present<'a>(state: &'a str, held: Duration, timings: &Timings) -> &'a str {
     "alerting" if held >= timings.alert_panic => "alerting3",
     "alerting" if held >= timings.alert_escalate => "alerting2",
     "success" | "error" if held >= timings.transient => "chilling",
+    // A long idle stretch falls through to a screensaver, if one is installed.
+    // Only from idle: never interrupt a state that is telling you something.
+    "chilling"
+      if !timings.screensaver_after.is_zero() && held >= timings.screensaver_after =>
+    {
+      "screensaver"
+    }
     other => other
   }
 }
@@ -590,6 +602,7 @@ pub async fn run_status_daemon(
   let applied_file = state_file.with_file_name("applied");
   let sessions_dir = state_file.with_file_name("sessions");
   let context_file = state_file.with_file_name("context");
+  let run_dir = state_file.parent().unwrap_or(faces_dir);
   let mut last_context: Option<u8> = None;
   // `requested` is what the hooks asked for; `displayed` is the face actually
   // on the panel. They differ whenever a state is being presented over time --
@@ -747,7 +760,9 @@ pub async fn run_status_daemon(
 
         // Resolve the image BEFORE touching the connection: a missing face is
         // a content problem and must not cost a healthy link.
-        let Some(path) = face_path(faces_dir, &face) else {
+        // The run directory is searched first so ad-hoc art (`draw`) can
+        // override a state without touching the user's faces directory.
+        let Some(path) = face_path(&[run_dir, faces_dir], &face) else {
           info!("No image for state {} in {}", face, faces_dir.display());
           displayed = Some(face);
           continue;
@@ -792,13 +807,15 @@ pub async fn run_status_daemon(
 /// Find the image for a state. Escalated variants are numbered
 /// (alerting2, alerting3); if one is missing -- an older faces directory, say
 /// -- fall back to the base face.
-fn face_path(faces_dir: &Path, state: &str) -> Option<std::path::PathBuf> {
+fn face_path(dirs: &[&Path], state: &str) -> Option<std::path::PathBuf> {
   let base = state.trim_end_matches(|c: char| c.is_ascii_digit());
   for name in [state, base] {
-    for ext in ["gif", "png"] {
-      let candidate = faces_dir.join(format!("{}.{}", name, ext));
-      if candidate.exists() {
-        return Some(candidate);
+    for dir in dirs {
+      for ext in ["gif", "png"] {
+        let candidate = dir.join(format!("{}.{}", name, ext));
+        if candidate.exists() {
+          return Some(candidate);
+        }
       }
     }
   }
@@ -971,7 +988,9 @@ mod status_daemon_tests {
 
   #[test]
   fn states_pass_through_untouched_when_fresh() {
-    for state in ["thinking", "working", "chilling", "compacting", "off"] {
+    // "chilling" is deliberately absent: it is the one idle state that ages
+    // into something else (the screensaver), covered by its own test.
+    for state in ["thinking", "working", "compacting", "off"] {
       assert_eq!(present(state, Duration::ZERO, &t()), state);
       assert_eq!(present(state, Duration::from_secs(3600), &t()), state);
     }
@@ -1030,7 +1049,8 @@ mod status_daemon_tests {
       alert_escalate: Duration::from_secs(5),
       alert_panic: Duration::from_secs(10),
       transient: Duration::from_secs(2),
-      celebrate_after: Duration::from_secs(3)
+      celebrate_after: Duration::from_secs(3),
+      screensaver_after: Duration::ZERO
     };
     assert_eq!(present("alerting", Duration::from_secs(4), &fast), "alerting");
     assert_eq!(present("alerting", Duration::from_secs(5), &fast), "alerting2");
@@ -1063,19 +1083,20 @@ mod status_daemon_tests {
     std::fs::write(dir.join("chilling.png"), b"x").unwrap();
 
     // exact match wins
-    assert!(face_path(&dir, "alerting").unwrap().ends_with("alerting.gif"));
+    let dirs = [dir.as_path()];
+    assert!(face_path(&dirs, "alerting").unwrap().ends_with("alerting.gif"));
     // a numbered variant with no file of its own falls back to the base face,
     // so an older faces directory degrades instead of failing
-    assert!(face_path(&dir, "alerting2").unwrap().ends_with("alerting.gif"));
-    assert!(face_path(&dir, "alerting3").unwrap().ends_with("alerting.gif"));
+    assert!(face_path(&dirs, "alerting2").unwrap().ends_with("alerting.gif"));
+    assert!(face_path(&dirs, "alerting3").unwrap().ends_with("alerting.gif"));
     // png is accepted when there is no gif
-    assert!(face_path(&dir, "chilling").unwrap().ends_with("chilling.png"));
+    assert!(face_path(&dirs, "chilling").unwrap().ends_with("chilling.png"));
     // genuinely absent stays absent -- the caller skips without touching the link
-    assert!(face_path(&dir, "nonexistent").is_none());
+    assert!(face_path(&dirs, "nonexistent").is_none());
 
     // an exact numbered file takes precedence over the fallback
     std::fs::write(dir.join("alerting2.gif"), b"x").unwrap();
-    assert!(face_path(&dir, "alerting2").unwrap().ends_with("alerting2.gif"));
+    assert!(face_path(&dirs, "alerting2").unwrap().ends_with("alerting2.gif"));
     let _ = std::fs::remove_dir_all(&dir);
   }
 
@@ -1219,5 +1240,24 @@ mod status_daemon_tests {
       .save_to_divoom_format(&mut buf)
       .expect("a composited GIF frame must still encode");
     assert!(!buf.is_empty());
+  }
+
+  #[test]
+  fn a_long_idle_falls_through_to_a_screensaver() {
+    let timings = t();
+    assert_eq!(present("chilling", Duration::from_secs(60), &timings), "chilling");
+    assert_eq!(
+      present("chilling", timings.screensaver_after, &timings),
+      "screensaver"
+    );
+    // Never from a state that is telling you something.
+    assert_eq!(present("alerting", Duration::from_secs(99999), &timings), "alerting3");
+    assert_eq!(present("working", Duration::from_secs(99999), &timings), "working");
+  }
+
+  #[test]
+  fn the_screensaver_can_be_switched_off() {
+    let off = Timings { screensaver_after: Duration::ZERO, ..Timings::default() };
+    assert_eq!(present("chilling", Duration::from_secs(99999), &off), "chilling");
   }
 }

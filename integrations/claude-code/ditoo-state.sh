@@ -3,6 +3,7 @@
 # Show a Claude Code status face on a Divoom Ditoo Pro.
 #
 #   ditoo-state.sh thinking|working|alerting|success|error|compacting|chilling|off
+#   ditoo-state.sh draw <image>   # show any image until the next state change
 #   ditoo-state.sh status      # what is going on right now
 #
 # Designed to be called from Claude Code hooks, which means two hard rules:
@@ -163,7 +164,8 @@ apply_state() {
   # drops in their own still image.
   local face=""
   local candidate
-  for candidate in "$FACES_DIR/$state.gif" "$FACES_DIR/$state.png"; do
+  for candidate in "$RUNDIR/$state.gif" "$RUNDIR/$state.png" \
+                   "$FACES_DIR/$state.gif" "$FACES_DIR/$state.png"; do
     if [ -f "$candidate" ]; then
       face="$candidate"
       break
@@ -215,6 +217,33 @@ mkdir -p "$RUNDIR" 2>/dev/null
 case "${1:-}" in
   --worker)
     run_worker
+    exit 0
+    ;;
+  draw)
+    # Show an arbitrary image. Copied into the run directory rather than the
+    # faces directory, which belongs to whoever drew the faces; the daemon
+    # searches the run directory first so this wins without overwriting
+    # anything.
+    src="${2:-}"
+    if [ -z "$src" ] || [ ! -f "$src" ]; then
+      printf 'usage: %s draw <image file>\n' "$(basename "$SELF")" >&2
+      exit 2
+    fi
+    mkdir -p "$RUNDIR" 2>/dev/null
+    rm -f "$RUNDIR/custom.gif" "$RUNDIR/custom.png"
+    case "$src" in
+      *.gif|*.GIF) cp "$src" "$RUNDIR/custom.gif" ;;
+      *)           cp "$src" "$RUNDIR/custom.png" ;;
+    esac
+    mkdir -p "$SESSIONS" 2>/dev/null
+    printf 'custom\n' > "$SESSIONS/$(session_id)"
+    printf 'custom\n' > "$DESIRED"
+    if ! daemon_running; then
+      # No daemon: fall through to the usual one-shot worker.
+      if mkdir "$LOCK" 2>/dev/null; then
+        nohup "$SELF" --worker >/dev/null 2>&1 &
+      fi
+    fi
     exit 0
     ;;
   start)
@@ -290,11 +319,11 @@ case "${1:-}" in
     tail -n 10 "$LOG" 2>/dev/null || printf '(no log yet)\n'
     exit 0
     ;;
-  thinking | working | alerting | success | error | compacting | chilling | off)
+  thinking | working | alerting | success | error | compacting | chilling | custom | off)
     STATE="$1"
     ;;
   *)
-    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|off|start|stop|status\n' "$(basename "$SELF")" >&2
+    printf 'usage: %s thinking|working|alerting|success|error|compacting|chilling|off|draw <image>|start|stop|status\n' "$(basename "$SELF")" >&2
     exit 2
     ;;
 esac

@@ -28,6 +28,31 @@ The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
 from a status light into a tiny desk companion.
 
+## Drawing anything
+
+```bash
+./integrations/claude-code/ditoo-state.sh draw picture.gif
+```
+
+Shows any image the tool can read (GIF, PNG, JPEG, BMP, WebP; animated GIFs
+animate). It is copied into the run directory, never into `faces/`, so it never
+overwrites your artwork -- and it stays up only until the next status change,
+which the hooks trigger constantly. It is for a deliberate moment, not a
+persistent display.
+
+A `ditoo` skill in `.claude/skills/` lets Claude reach for this itself.
+
+## Idle screensaver (optional)
+
+After 30 minutes idle the panel falls through to `screensaver.gif`, if you have
+put one in the faces directory. With no such file it simply stays on
+`chilling`. Only idle ages into it -- a state that is telling you something is
+never interrupted.
+
+```bash
+DITOO_SCREENSAVER_AFTER_SECS=0    # switch it off entirely
+```
+
 ## Context fuel gauge (optional)
 
 Claude Code can forward how full the context window is, and the daemon paints

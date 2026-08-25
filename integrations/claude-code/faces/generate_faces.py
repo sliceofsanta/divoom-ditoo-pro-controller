@@ -214,39 +214,42 @@ def mushroom(grid, x, y, colour=CAP_RED):
 
 # --- Pac-Man board --------------------------------------------------------
 
-PAC_DOTS = (
-  (1, 1), (3, 1), (5, 1), (7, 1), (9, 1), (11, 1), (13, 1),
-  (1, 5), (3, 5), (5, 5), (10, 5), (12, 5), (14, 5),
-  (1, 7), (4, 7), (11, 7), (14, 7),
-  (1, 10), (3, 10), (5, 10), (10, 10), (12, 10), (14, 10),
-  (1, 14), (3, 14), (5, 14), (7, 14), (9, 14), (11, 14), (13, 14),
+PAC_MAZE_LAYOUT = (
+  "################",
+  "#......##......#",
+  "#.##..#..#..##.#",
+  "#.##..#..#..##.#",
+  "#..............#",
+  "#.##.#.##.#.##.#",
+  "#....#.##.#....#",
+  "####..#==#..####",
+  "......#..#......",
+  "####..####..####",
+  "#......##......#",
+  "#.##.#.##.#.##.#",
+  "#..#........#..#",
+  "##.#.######.#.##",
+  "#..............#",
+  "################",
+)
+
+PAC_POWER_POINTS = ((1, 3), (14, 3), (1, 12), (14, 12))
+PAC_DOTS = tuple(
+  (x, y)
+  for y, row in enumerate(PAC_MAZE_LAYOUT)
+  for x, value in enumerate(row)
+  if value == "." and (x + y) % 2 == 0 and (x, y) not in PAC_POWER_POINTS
 )
 
 
 def pac_maze(grid, wall=PAC_WALL, gate=GHOST_PINK):
-  """Draw a complete, zoomed-out neon maze with side tunnels and ghost house."""
-  # Outer loop, with the two classic tunnel openings at mid-height.
-  mascot.rect(grid, 0, 0, 15, 0, wall)
-  mascot.rect(grid, 0, 15, 15, 15, wall)
-  mascot.rect(grid, 0, 0, 0, 5, wall)
-  mascot.rect(grid, 0, 10, 0, 15, wall)
-  mascot.rect(grid, 15, 0, 15, 5, wall)
-  mascot.rect(grid, 15, 10, 15, 15, wall)
-
-  # Four maze islands leave three-pixel corridors for the tiny characters.
-  mascot.rect(grid, 2, 3, 5, 4, wall)
-  mascot.rect(grid, 10, 3, 13, 4, wall)
-  mascot.rect(grid, 2, 11, 5, 12, wall)
-  mascot.rect(grid, 10, 11, 13, 12, wall)
-  pixels(grid, ((2, 2), (5, 2), (10, 2), (13, 2),
-                (2, 13), (5, 13), (10, 13), (13, 13)), PAC_WALL_LIGHT if wall == PAC_WALL else wall)
-
-  # Central ghost house, including a contrasting gate.
-  mascot.rect(grid, 6, 6, 9, 6, wall)
-  mascot.rect(grid, 6, 6, 6, 9, wall)
-  mascot.rect(grid, 9, 6, 9, 9, wall)
-  mascot.rect(grid, 6, 9, 9, 9, wall)
-  mascot.rect(grid, 7, 6, 8, 6, gate)
+  """Draw a thin, symmetric miniature of the complete arcade maze."""
+  for y, row in enumerate(PAC_MAZE_LAYOUT):
+    for x, value in enumerate(row):
+      if value == "#":
+        mascot.px(grid, x, y, wall)
+      elif value == "=":
+        mascot.px(grid, x, y, gate)
 
 
 def pac_pellets(grid, hidden=(), colour=PAC_PELLET):
@@ -254,49 +257,43 @@ def pac_pellets(grid, hidden=(), colour=PAC_PELLET):
   for point in PAC_DOTS:
     if point not in hidden:
       mascot.px(grid, point[0], point[1], colour)
+  for point in PAC_POWER_POINTS:
+    if point not in hidden:
+      mascot.px(grid, point[0], point[1], CREAM)
 
 
 def power_pellet(grid, x, y, bright=True):
   colour = CREAM if bright else PAC_PELLET
-  mascot.rect(grid, x, y, x + 1, y + 1, colour)
+  mascot.px(grid, x, y, colour)
 
 
 def pacman(grid, x, y, direction="right", mouth=True):
-  """Three-wide Pac-Man; the missing edge pixel is the animated mouth."""
-  points = {(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1),
-            (0, 2), (1, 2), (2, 2)}
+  """Two-wide Pac-Man; one missing pixel becomes the animated mouth."""
+  points = {(0, 0), (1, 0), (0, 1), (1, 1)}
   if mouth:
     missing = {
-      "right": {(2, 1)}, "left": {(0, 1)},
-      "up": {(1, 0)}, "down": {(1, 2)},
-    }.get(direction, {(2, 1)})
+      "right": {(1, 1)}, "left": {(0, 1)},
+      "up": {(1, 0)}, "down": {(1, 1)},
+    }.get(direction, {(1, 1)})
     points -= missing
-  # Clip the square's corners into a rounder silhouette.
-  points -= {(0, 0), (2, 2)} if direction in ("right", "down") else {(2, 0), (0, 2)}
   for px_x, px_y in points:
     mascot.px(grid, x + px_x, y + px_y, PAC_YELLOW)
-  eye_x = 1 if direction != "left" else 0
-  mascot.px(grid, x + eye_x, y, INK)
 
 
 def ghost(grid, x, y, colour, look=-1, blink=False, eyes_only=False):
-  """Three-wide ghost with domed head, two eyes and a split skirt."""
+  """Two-wide, three-tall ghost for the fully zoomed-out maze."""
   if not eyes_only:
-    pixels(grid, ((x + 1, y), (x, y + 1), (x + 1, y + 1), (x + 2, y + 1),
-                  (x, y + 2), (x + 1, y + 2), (x + 2, y + 2),
-                  (x, y + 3), (x + 2, y + 3)), colour)
+    pixels(grid, ((x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1),
+                  (x, y + 2), (x + 1, y + 2)), colour)
   if blink:
-    pixels(grid, ((x, y + 1), (x + 2, y + 1)), INK)
+    mascot.px(grid, x + 1, y, INK)
   else:
-    pixels(grid, ((x, y + 1), (x + 2, y + 1)), CREAM)
-    pupil_shift = 1 if look > 0 else 0
-    pixels(grid, ((x + pupil_shift, y + 2), (x + 2, y + 2)), PAC_WALL)
+    mascot.px(grid, x + (1 if look > 0 else 0), y, CREAM)
 
 
 def cherry(grid, x, y):
-  pixels(grid, ((x, y + 2), (x + 1, y + 1), (x + 3, y + 2),
-                (x + 1, y + 3), (x + 3, y + 3)), CHERRY_RED)
-  pixels(grid, ((x + 1, y), (x + 2, y), (x + 2, y + 1)), PIPE)
+  pixels(grid, ((x, y + 1), (x + 2, y + 1), (x, y + 2), (x + 2, y + 2)), CHERRY_RED)
+  pixels(grid, ((x + 1, y), (x + 1, y + 1)), PIPE)
 
 
 def heart(grid, x, y, colour=HOT, broken=False):
@@ -363,10 +360,10 @@ def thinking_frames():
     grid = mascot.blank(INK)
     pac_maze(grid)
     pac_pellets(grid)
-    power_pellet(grid, 1, 1, bright=i % 4 < 2)
-    power_pellet(grid, 13, 1, bright=i % 4 >= 2)
+    power_pellet(grid, 1, 3, bright=i % 4 < 2)
+    power_pellet(grid, 14, 3, bright=i % 4 >= 2)
     direction = "left" if i % 4 < 2 else "right"
-    pacman(grid, 6, 1, direction=direction, mouth=i % 2 == 0)
+    pacman(grid, 7, 3, direction=direction, mouth=i % 2 == 0)
     frames.append(grid)
   return frames, [240, 180, 240, 300, 240, 180, 240, 320]
 
@@ -417,10 +414,10 @@ def alerting_frames():
     grid = mascot.blank(INK)
     pac_maze(grid, wall=PAC_WALL_LIGHT if i in (3, 7) else PAC_WALL)
     pac_pellets(grid)
-    pacman(grid, 1, 6, direction="right", mouth=i % 3 == 0)
+    pacman(grid, 1, 8, direction="right", mouth=i % 3 == 0)
     power_pellet(grid, 7, 7, bright=i % 2 == 0)
-    ghost(grid, 11 - (i // 4), 6, GHOST_RED, look=-1, blink=i == 6)
-    mascot.rect(grid, 7, 1, 8, 3, GHOST_PINK if i % 2 else CREAM)
+    ghost(grid, 12 - (i // 4), 8, GHOST_RED, look=-1, blink=i == 6)
+    mascot.rect(grid, 7, 1, 7, 3, GHOST_PINK if i % 2 else CREAM)
     mascot.px(grid, 7, 5, GHOST_PINK if i % 2 else CREAM)
     frames.append(grid)
   return frames, [190, 190, 160, 230, 190, 190, 160, 250]
@@ -434,11 +431,11 @@ def success_frames():
     wall = (PAC_WALL, PAC_WALL_LIGHT, CREAM)[i % 3]
     pac_maze(grid, wall=wall, gate=GHOST_PINK)
     cherry(grid, 6, 1)
-    pacman(grid, 2 + min(i, 5), 7, direction="right", mouth=i % 2 == 0)
+    pacman(grid, 2 + min(i, 5), 8, direction="right", mouth=i % 2 == 0)
     if i < 6:
-      ghost(grid, 10, 6, GHOST_FRIGHT, look=1, blink=i % 3 == 0)
+      ghost(grid, 10, 8, GHOST_FRIGHT, look=1, blink=i % 3 == 0)
     else:
-      ghost(grid, 10, 6, GHOST_FRIGHT, eyes_only=True)
+      ghost(grid, 10, 8, GHOST_FRIGHT, eyes_only=True)
     if i < 8:
       ghost(grid, 12, 10, GHOST_FRIGHT, look=1, blink=i % 4 == 0)
     pixels(grid, ((1, 2 + i % 2), (4, 1), (11, 2), (14, 1 + i % 3)),
@@ -456,22 +453,22 @@ def error_frames():
     pac_maze(grid, wall=wall)
     pac_pellets(grid)
     if i < 3:
-      pacman(grid, 3 + i, 7, direction="right", mouth=i % 2 == 0)
-      ghost(grid, 9 - i, 6, GHOST_RED, look=-1)
+      pacman(grid, 3 + i, 8, direction="right", mouth=i % 2 == 0)
+      ghost(grid, 9 - i, 8, GHOST_RED, look=-1)
     elif i == 3:
-      ghost(grid, 6, 6, GHOST_RED, look=-1)
+      ghost(grid, 6, 8, GHOST_RED, look=-1)
       pixels(grid, ((6, 7), (7, 6), (8, 7), (7, 8)), PAC_YELLOW)
     elif i == 4:
-      ghost(grid, 6, 6, GHOST_RED, blink=True)
+      ghost(grid, 6, 8, GHOST_RED, blink=True)
       pixels(grid, ((7, 5), (5, 7), (9, 7), (7, 9)), PAC_YELLOW)
     elif i == 5:
-      ghost(grid, 6, 6, GHOST_RED, look=1)
+      ghost(grid, 6, 8, GHOST_RED, look=1)
       pixels(grid, ((5, 5), (9, 5), (5, 9), (9, 9)), PAC_YELLOW)
     elif i == 6:
-      ghost(grid, 7, 6, GHOST_RED, look=1)
+      ghost(grid, 7, 8, GHOST_RED, look=1)
       pixels(grid, ((4, 4), (10, 4), (4, 10), (10, 10)), PAC_YELLOW)
     else:
-      ghost(grid, 8, 6, GHOST_RED, look=1)
+      ghost(grid, 8, 8, GHOST_RED, look=1)
     frames.append(grid)
   return frames, [160, 120, 110, 180, 140, 150, 180, 260]
 
@@ -484,11 +481,11 @@ def alerting2_frames():
     wall = GHOST_PINK if i % 2 == 0 else PAC_WALL_LIGHT
     pac_maze(grid, wall=wall, gate=CREAM)
     pac_pellets(grid)
-    pacman(grid, 1, 6, direction="right", mouth=i % 2 == 0)
+    pacman(grid, 1, 8, direction="right", mouth=i % 2 == 0)
     power_pellet(grid, 6, 7, bright=i % 2 == 0)
-    ghost(grid, 8 - i // 3, 6, GHOST_RED, look=-1)
-    ghost(grid, 11 - i // 4, 9, GHOST_PINK, look=-1, blink=i == 6)
-    mascot.rect(grid, 7, 1, 8, 3, CREAM if i % 2 == 0 else GHOST_RED)
+    ghost(grid, 10 - i // 3, 8, GHOST_RED, look=-1)
+    ghost(grid, 12 - i // 4, 11, GHOST_PINK, look=-1, blink=i == 6)
+    mascot.rect(grid, 7, 1, 7, 3, CREAM if i % 2 == 0 else GHOST_RED)
     mascot.px(grid, 7, 5, CREAM if i % 2 == 0 else GHOST_RED)
     frames.append(grid)
   return frames, [100, 90, 100, 90, 100, 90, 100, 120]
