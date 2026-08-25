@@ -64,6 +64,20 @@ Settings > Privacy & Security > Calendars**. Without it nothing is written and
 the panel just shows the normal idle face -- the countdown is additive, never a
 prerequisite.
 
+## Launcher shortcuts
+
+`raycast/` holds one-line scripts for Raycast (point Raycast at that folder in
+Extensions > Script Commands). They are ordinary shell scripts, so Alfred,
+Shortcuts or a keybinding can call them just as well:
+
+| Script | Does |
+|---|---|
+| `ditoo-idle.sh` | show the idle face |
+| `ditoo-alert.sh` | raise an alert -- useful as a timer or a nudge |
+| `ditoo-draw.sh <image>` | put any image on the panel |
+| `ditoo-off.sh` | blank it |
+| `ditoo-status.sh` | what the daemon is doing |
+
 ## Focus and sleep
 
 Both are automatic, nothing to configure.
