@@ -1,23 +1,21 @@
 # Claude Code status display
 
-Turn a Divoom Ditoo Pro into a **Clauddy desk companion** for
-[Claude Code](https://claude.com/claude-code). The art follows the wonderfully
-simple staging of [Clauddy MiniToo](https://github.com/bugzmanov/divoom-minitoo/tree/main/apps/clauddy/assets):
-one large flat terracotta mascot, tiny black eyes and feet, charcoal background,
-and one oversized action or prop. The frames are original 16x16 drawings made
-for this display rather than resized copies of the reference assets.
+Turn a Divoom Ditoo Pro into a **Santa Claus desk companion** for
+[Claude Code](https://claude.com/claude-code). Santa has a big red hat, white
+beard, little boots and one readable action for each state. All nine animations
+are drawn directly on the 16x16 pixel grid, with a consistent face and palette.
 
 | State | When | Animation |
 |---|---|---|
-| `thinking` | you submit a prompt | **BLUEPRINT:** Clauddy opens one huge cyan building plan |
-| `working` | Claude runs a tool | **HAMMERING:** Clauddy works a brick at the bench with a huge hammer |
-| `compacting` | Claude compacts context | **SQUEEZE:** loose plan sheets compress into one strapped bundle |
-| `alerting` | Claude needs your input | **HEY:** one slow exclamation and one raised hand |
-| `alerting2` | still waiting after 1 minute | **STILL WAITING:** a larger flashing mark and both hands up |
-| `alerting3` | still waiting after 5 minutes | **ALARM:** giant red strobe and jumping Clauddy |
-| `success` | Claude finished responding | **BUILT:** a finished glowing workshop floats above a happy jump |
-| `error` | a tool or the turn failed | **BROKEN:** the workshop cracks while Clauddy stares with X eyes |
-| `chilling` | a session starts, or manual | **TEA BREAK:** closed eyes, a steaming mug and a tiny floating Z |
+| `thinking` | you submit a prompt | **CHECKING THE LIST:** Santa reads a scroll, eyes and pointer scanning |
+| `working` | Claude runs a tool | **GIFT WRAPPING:** wrap, tie, pat and slide the finished gift away |
+| `compacting` | Claude compacts context | **PACKING THE SACK:** drop a parcel inside, squeeze, tie and release |
+| `alerting` | Claude needs your input | **A LITTLE DING:** Santa raises one bell gently |
+| `alerting2` | still waiting after 1 minute | **STILL HERE:** repeated bell gestures with a gold exclamation |
+| `alerting3` | still waiting after 5 minutes | **JINGLE ALARM:** two bells, hops and a red exclamation |
+| `success` | a turn ends after 10+ minutes of work | **SPECIAL DELIVERY:** six-second gift celebration with confetti |
+| `error` | a tool or the turn failed | **OH DEER:** six-second reaction to a cracked, splitting present |
+| `chilling` | idle, session start or manual | **COCOA BREAK:** sleepy eyes, a warm mug and curling steam |
 | `off` | the session ends, or manual | blank display |
 
 Alerts split by what they actually want from you, so you can tell a keystroke
@@ -57,10 +55,11 @@ The count is per session and the panel shows the total, so with several windows
 open the pips answer "how many agents are out" rather than picking one window's
 fan-out. A window starting a new turn clears only its own.
 
-Clauddy remains the largest object in every frame. There is no cream face panel,
-costume, scenery or split-screen composition: the terracotta body itself is the
-character. Cyan is reserved for plans and tidy-up, yellow for attention and
-completion, and red only for failure or the final alert escalation.
+Santa's hat, face and beard stay visible throughout the animations. Props sit
+beside his face or across his coat. Alerts escalate through gesture size, bell
+count and an exclamation mark, with a stable dark background. The supplied
+success and error cycles each last six seconds, matching the daemon's default
+verdict display duration.
 
 The point is still the `alerting` state: you can look away from the terminal and
 notice the moment Claude is blocked on you. The other poses turn the display
@@ -477,10 +476,8 @@ Drop your own 16x16 animated GIF into `faces/` named after the state
 fallback if no GIF exists. `alerting2` and `alerting3` are the automatic
 one-minute and five-minute escalations used by the daemon.
 
-To edit the bundled ones, change the Clauddy scenes in
-[`faces/generate_faces.py`](faces/generate_faces.py) and re-run it. The same file
-contains reusable drawing primitives for Clauddy, the blueprint, compressed
-material bundle, workbench, hammer, exclamation and tiny workshop:
+To edit the bundled ones, change the Santa scenes in
+[`faces/santa_faces.py`](faces/santa_faces.py), then run the exporter:
 
 ```bash
 python3 faces/generate_faces.py --preview
@@ -498,7 +495,8 @@ at this scale.
 
 The faces are drawn from scratch directly on the 16x16 grid. The generator uses
 the shared low-level pixel helpers in [`faces/mascot.py`](faces/mascot.py), while
-its own flat Clauddy rig keeps the body, eyes, arms and four feet consistent.
+the Santa drawing functions keep his proportions consistent. The previous
+Clauddy theme remains available with `--theme clauddy`; Santa is the default.
 
 Only stdlib is used -- [`faces/gifwriter.py`](faces/gifwriter.py) is a small
 GIF89a encoder written for this purpose, so there are no pip installs. If you

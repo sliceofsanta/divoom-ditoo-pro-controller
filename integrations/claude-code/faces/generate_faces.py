@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Generate nine Clauddy-style 16x16 status animations for Ditoo Pro.
+"""Generate nine 16x16 Santa status animations for Ditoo Pro.
+
+Santa is the default theme, implemented in santa_faces.py. Use --theme clauddy
+to regenerate the earlier Clauddy artwork defined below.
 
 The visual grammar is intentionally simple: one large flat terracotta mascot,
 one oversized prop, charcoal background, tiny black eyes, stick arms and four
@@ -359,7 +362,7 @@ def off_frames():
   return [[[black] * SIZE for _ in range(SIZE)]], [500]
 
 
-FACES = {
+CLAUDDY_FACES = {
   "thinking": (thinking_frames, "BLUEPRINT -- Clauddy opens the plan"),
   "working": (working_frames, "HAMMERING -- workbench, brick and sparks"),
   "alerting": (alerting_frames, "HEY -- slow exclamation and one raised hand"),
@@ -371,6 +374,8 @@ FACES = {
   "chilling": (chilling_frames, "TEA BREAK -- closed eyes, steam and a tiny Z"),
   "off": (off_frames, "blank display"),
 }
+
+from santa_faces import FACES
 
 
 # --- output ---------------------------------------------------------------
@@ -461,9 +466,12 @@ def main():
   parser.add_argument("--preview", action="store_true",
                       help="also write 320x320 preview GIFs")
   parser.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
+  parser.add_argument("--theme", choices=("santa", "clauddy"), default="santa",
+                      help="character theme (default: santa)")
   args = parser.parse_args()
 
-  for name, (builder, doc) in FACES.items():
+  faces = FACES if args.theme == "santa" else CLAUDDY_FACES
+  for name, (builder, doc) in faces.items():
     frames, delays = builder()
     validate_frames(name, frames, delays)
     indexed, palette = index_frames(frames)
