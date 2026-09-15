@@ -47,7 +47,13 @@ fn main() {
     }
   }
 
-  let ns = NSString::from_str("B1:21:81:BE:C4:E0");
+  // Pass the device's address rather than baking one into a public repo:
+  //   cargo run --example mac_probe -- AA:BB:CC:DD:EE:FF
+  let Some(address) = std::env::args().nth(1) else {
+    println!("usage: mac_probe <bluetooth address>");
+    return;
+  };
+  let ns = NSString::from_str(&address);
   let device = match unsafe { IOBluetoothDevice::deviceWithAddressString(Some(&ns)) } {
     Some(d) => d,
     None => {
