@@ -60,8 +60,6 @@ When it needs you, and when it's talking to the room:
 
 </details>
 
-<table><tr><td align="center"><img src="docs/themes/clawd/screensaver.gif" width="128" alt="clawd screensaver"><br><sub>screensaver: the runaway cursor</sub></td></tr></table>
-
 ### Santa
 
 Ho ho ho, it's always December on this desk.
@@ -70,8 +68,6 @@ Ho ho ho, it's always December on this desk.
 <tr><td align="center"><img src="docs/themes/santa/thinking.gif" width="128" alt="santa thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/santa/working.gif" width="128" alt="santa working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/santa/compacting.gif" width="128" alt="santa compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/santa/success.gif" width="128" alt="santa success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/santa/error.gif" width="128" alt="santa error"><br><sub>error 💥</sub></td></tr>
 <tr><td align="center"><img src="docs/themes/santa/alerting.gif" width="128" alt="santa alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/santa/alerting2.gif" width="128" alt="santa alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/santa/alerting3.gif" width="128" alt="santa alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/santa/chilling.gif" width="128" alt="santa chilling"><br><sub>chilling</sub></td></tr>
 </table>
-
-Santa has a 25-second comedy screensaver too: `make_screensaver.py --theme santa`.
 
 ### Clauddy
 
@@ -92,11 +88,19 @@ room, for the alerts and presence states.
 <tr><td align="center"><img src="docs/themes/glyphs/alert-permission.gif" width="128" alt="glyphs alert-permission"><br><sub>approve something</sub></td><td align="center"><img src="docs/themes/glyphs/alert-question.gif" width="128" alt="glyphs alert-question"><br><sub>answer a question</sub></td><td align="center"><img src="docs/themes/glyphs/alert-plan.gif" width="128" alt="glyphs alert-plan"><br><sub>review a plan</sub></td><td align="center"><img src="docs/themes/glyphs/meeting.gif" width="128" alt="glyphs meeting"><br><sub>in a meeting</sub></td><td align="center"><img src="docs/themes/glyphs/busy.gif" width="128" alt="glyphs busy"><br><sub>heads-down</sub></td></tr>
 </table>
 
-### Embers
+### Screensavers
 
-The calm screensaver: slow drifting embers that never look like a status.
+After 30 minutes of nothing, the panel drifts into a screensaver. Pick yours
+with `make_screensaver.py --theme clawd|santa|embers`.
 
-<table><tr><td align="center"><img src="docs/themes/embers/screensaver.gif" width="128" alt="embers screensaver"><br><sub>screensaver</sub></td></tr></table>
+<table><tr>
+<td align="center"><img src="docs/themes/clawd/screensaver.gif" width="128" alt="clawd screensaver"><br><sub><b>Clawd</b>: the runaway cursor<br>19 seconds of chasing</sub></td>
+<td align="center"><img src="docs/themes/santa/screensaver.gif" width="128" alt="santa screensaver"><br><sub><b>Santa</b>: a 25-second<br>comedy bit</sub></td>
+<td align="center"><img src="docs/themes/embers/screensaver.gif" width="128" alt="embers screensaver"><br><sub><b>Embers</b>: slow, calm,<br>never looks like a status</sub></td>
+</tr></table>
+
+Or skip the art and hand the panel to the Ditoo's own clock:
+`echo 61 > ~/.claude/ditoo/clock`.
 
 # Features
 
