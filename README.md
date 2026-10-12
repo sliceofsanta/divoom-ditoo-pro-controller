@@ -3,6 +3,101 @@
 A CLI tool to control a Divoom Ditoo Pro over Bluetooth (SPP/RFCOMM).
 The original app from the vendor is proprietary; this project reverse-engineers the protocol.
 
+# Claude Code status display (the fun part)
+
+This tiny pixel speaker now sits on a desk and tells you what Claude Code is up
+to, without you ever looking at the terminal. Think of it as a mood ring for
+your agent. No speaker, no mic, so it's office-safe.
+
+- 🤔 **What's Claude doing?** Thinking, working, compacting, done, broken. One glance.
+- 🙋 **Does it need me? Why?** A padlock means approve something, a `?` means
+  answer a question, a page means review a plan. Ignore it and it gets louder.
+- 🤖 **Agents everywhere?** One dot per subagent along the top row, lighting
+  up as each one finishes.
+- 🌙 **Walked away?** A build that fails at 3am is still red at 9.
+- 📅 **Meetings?** Counts down to your next one, then tells anyone walking up
+  that you're in it.
+- ⌨️ **The keyboard joins in.** The Ditoo's key lights pulse on alerts and
+  sparkle on success.
+
+Setup and the full tour are in [integrations/claude-code](integrations/claude-code/README.md).
+
+## Pick a mascot
+
+Every theme is drawn pixel by pixel on the 16x16 grid. Switch with `--theme`
+and reinstall:
+
+```bash
+python3 integrations/claude-code/faces/generate_faces.py --theme clawd     # or santa, clauddy
+python3 integrations/claude-code/faces/generate_glyphs.py --theme clawd    # or glyphs
+python3 integrations/claude-code/faces/make_screensaver.py --theme clawd   # or santa, embers
+./integrations/claude-code/install-launchagent.sh
+```
+
+### Clawd (default)
+
+A chunky terracotta desk companion with a prop for every mood.
+
+<table>
+<tr><td align="center"><img src="docs/themes/clawd/thinking.gif" width="128" alt="clawd thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/clawd/working.gif" width="128" alt="clawd working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/clawd/compacting.gif" width="128" alt="clawd compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/clawd/success.gif" width="128" alt="clawd success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/clawd/error.gif" width="128" alt="clawd error"><br><sub>error 💥</sub></td></tr>
+<tr><td align="center"><img src="docs/themes/clawd/alerting.gif" width="128" alt="clawd alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/clawd/alerting2.gif" width="128" alt="clawd alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/clawd/alerting3.gif" width="128" alt="clawd alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/clawd/chilling.gif" width="128" alt="clawd chilling"><br><sub>chilling</sub></td></tr>
+</table>
+
+When it needs you, and when it's talking to the room:
+
+<table>
+<tr><td align="center"><img src="docs/themes/clawd/alert-permission.gif" width="128" alt="clawd alert-permission"><br><sub>approve something</sub></td><td align="center"><img src="docs/themes/clawd/alert-question.gif" width="128" alt="clawd alert-question"><br><sub>answer a question</sub></td><td align="center"><img src="docs/themes/clawd/alert-plan.gif" width="128" alt="clawd alert-plan"><br><sub>review a plan</sub></td><td align="center"><img src="docs/themes/clawd/meeting.gif" width="128" alt="clawd meeting"><br><sub>in a meeting</sub></td><td align="center"><img src="docs/themes/clawd/busy.gif" width="128" alt="clawd busy"><br><sub>heads-down</sub></td></tr>
+</table>
+
+<details>
+<summary><b>…and 17 more things Clawd does while working</b></summary>
+
+<table>
+<tr><td align="center"><img src="docs/themes/clawd/starting.gif" width="128" alt="clawd starting"><br><sub>starting</sub></td><td align="center"><img src="docs/themes/clawd/reading.gif" width="128" alt="clawd reading"><br><sub>reading</sub></td><td align="center"><img src="docs/themes/clawd/searching.gif" width="128" alt="clawd searching"><br><sub>searching</sub></td><td align="center"><img src="docs/themes/clawd/writing.gif" width="128" alt="clawd writing"><br><sub>writing</sub></td><td align="center"><img src="docs/themes/clawd/terminal.gif" width="128" alt="clawd terminal"><br><sub>terminal</sub></td><td align="center"><img src="docs/themes/clawd/testing.gif" width="128" alt="clawd testing"><br><sub>testing</sub></td></tr>
+<tr><td align="center"><img src="docs/themes/clawd/building.gif" width="128" alt="clawd building"><br><sub>building</sub></td><td align="center"><img src="docs/themes/clawd/installing.gif" width="128" alt="clawd installing"><br><sub>installing</sub></td><td align="center"><img src="docs/themes/clawd/reviewing.gif" width="128" alt="clawd reviewing"><br><sub>reviewing</sub></td><td align="center"><img src="docs/themes/clawd/planning.gif" width="128" alt="clawd planning"><br><sub>planning</sub></td><td align="center"><img src="docs/themes/clawd/connecting.gif" width="128" alt="clawd connecting"><br><sub>connecting</sub></td><td align="center"><img src="docs/themes/clawd/responding.gif" width="128" alt="clawd responding"><br><sub>responding</sub></td></tr>
+<tr><td align="center"><img src="docs/themes/clawd/configuring.gif" width="128" alt="clawd configuring"><br><sub>configuring</sub></td><td align="center"><img src="docs/themes/clawd/delegating.gif" width="128" alt="clawd delegating"><br><sub>delegating</sub></td><td align="center"><img src="docs/themes/clawd/taskdone.gif" width="128" alt="clawd taskdone"><br><sub>taskdone</sub></td><td align="center"><img src="docs/themes/clawd/done.gif" width="128" alt="clawd done"><br><sub>done</sub></td><td align="center"><img src="docs/themes/clawd/cancelled.gif" width="128" alt="clawd cancelled"><br><sub>cancelled</sub></td></tr>
+</table>
+
+</details>
+
+<table><tr><td align="center"><img src="docs/themes/clawd/screensaver.gif" width="128" alt="clawd screensaver"><br><sub>screensaver: the runaway cursor</sub></td></tr></table>
+
+### Santa
+
+Ho ho ho, it's always December on this desk.
+
+<table>
+<tr><td align="center"><img src="docs/themes/santa/thinking.gif" width="128" alt="santa thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/santa/working.gif" width="128" alt="santa working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/santa/compacting.gif" width="128" alt="santa compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/santa/success.gif" width="128" alt="santa success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/santa/error.gif" width="128" alt="santa error"><br><sub>error 💥</sub></td></tr>
+<tr><td align="center"><img src="docs/themes/santa/alerting.gif" width="128" alt="santa alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/santa/alerting2.gif" width="128" alt="santa alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/santa/alerting3.gif" width="128" alt="santa alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/santa/chilling.gif" width="128" alt="santa chilling"><br><sub>chilling</sub></td></tr>
+</table>
+
+Santa has a 25-second comedy screensaver too: `make_screensaver.py --theme santa`.
+
+### Clauddy
+
+The original. A little builder in a construction workshop: blueprints, hammers,
+and a building that cracks when things go wrong.
+
+<table>
+<tr><td align="center"><img src="docs/themes/clauddy/thinking.gif" width="128" alt="clauddy thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/clauddy/working.gif" width="128" alt="clauddy working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/clauddy/compacting.gif" width="128" alt="clauddy compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/clauddy/success.gif" width="128" alt="clauddy success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/clauddy/error.gif" width="128" alt="clauddy error"><br><sub>error 💥</sub></td></tr>
+<tr><td align="center"><img src="docs/themes/clauddy/alerting.gif" width="128" alt="clauddy alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/clauddy/alerting2.gif" width="128" alt="clauddy alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/clauddy/alerting3.gif" width="128" alt="clauddy alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/clauddy/chilling.gif" width="128" alt="clauddy chilling"><br><sub>chilling</sub></td></tr>
+</table>
+
+### Glyphs
+
+No character, just bold symbols on coloured grounds. Readable from across the
+room, for the alerts and presence states.
+
+<table>
+<tr><td align="center"><img src="docs/themes/glyphs/alert-permission.gif" width="128" alt="glyphs alert-permission"><br><sub>approve something</sub></td><td align="center"><img src="docs/themes/glyphs/alert-question.gif" width="128" alt="glyphs alert-question"><br><sub>answer a question</sub></td><td align="center"><img src="docs/themes/glyphs/alert-plan.gif" width="128" alt="glyphs alert-plan"><br><sub>review a plan</sub></td><td align="center"><img src="docs/themes/glyphs/meeting.gif" width="128" alt="glyphs meeting"><br><sub>in a meeting</sub></td><td align="center"><img src="docs/themes/glyphs/busy.gif" width="128" alt="glyphs busy"><br><sub>heads-down</sub></td></tr>
+</table>
+
+### Embers
+
+The calm screensaver: slow drifting embers that never look like a status.
+
+<table><tr><td align="center"><img src="docs/themes/embers/screensaver.gif" width="128" alt="embers screensaver"><br><sub>screensaver</sub></td></tr></table>
+
 # Features
 
 - **Display**: send images (PNG, JPEG, GIF, BMP, WebP), animations (Divoom 16x16 format), video (anything mpv can play, including YouTube URLs)
@@ -179,101 +274,6 @@ macOS is supported natively via IOBluetooth (Linux uses BlueZ). Differences:
 ```bash
 cargo install --path . --no-default-features --features all-image-formats
 ```
-
-# Claude Code status display (the fun part)
-
-This tiny pixel speaker now sits on a desk and tells you what Claude Code is up
-to, without you ever looking at the terminal. Think of it as a mood ring for
-your agent. No speaker, no mic, so it's office-safe.
-
-- 🤔 **What's Claude doing?** Thinking, working, compacting, done, broken. One glance.
-- 🙋 **Does it need me? Why?** A padlock means approve something, a `?` means
-  answer a question, a page means review a plan. Ignore it and it gets louder.
-- 🤖 **Agents everywhere?** One dot per subagent along the top row, lighting
-  up as each one finishes.
-- 🌙 **Walked away?** A build that fails at 3am is still red at 9.
-- 📅 **Meetings?** Counts down to your next one, then tells anyone walking up
-  that you're in it.
-- ⌨️ **The keyboard joins in.** The Ditoo's key lights pulse on alerts and
-  sparkle on success.
-
-Setup and the full tour are in [integrations/claude-code](integrations/claude-code/README.md).
-
-## Pick a mascot
-
-Every theme is drawn pixel by pixel on the 16x16 grid. Switch with `--theme`
-and reinstall:
-
-```bash
-python3 integrations/claude-code/faces/generate_faces.py --theme clawd     # or santa, clauddy
-python3 integrations/claude-code/faces/generate_glyphs.py --theme clawd    # or glyphs
-python3 integrations/claude-code/faces/make_screensaver.py --theme clawd   # or santa, embers
-./integrations/claude-code/install-launchagent.sh
-```
-
-### Clawd (default)
-
-A chunky terracotta desk companion with a prop for every mood.
-
-<table>
-<tr><td align="center"><img src="docs/themes/clawd/thinking.gif" width="128" alt="clawd thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/clawd/working.gif" width="128" alt="clawd working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/clawd/compacting.gif" width="128" alt="clawd compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/clawd/success.gif" width="128" alt="clawd success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/clawd/error.gif" width="128" alt="clawd error"><br><sub>error 💥</sub></td></tr>
-<tr><td align="center"><img src="docs/themes/clawd/alerting.gif" width="128" alt="clawd alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/clawd/alerting2.gif" width="128" alt="clawd alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/clawd/alerting3.gif" width="128" alt="clawd alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/clawd/chilling.gif" width="128" alt="clawd chilling"><br><sub>chilling</sub></td></tr>
-</table>
-
-When it needs you, and when it's talking to the room:
-
-<table>
-<tr><td align="center"><img src="docs/themes/clawd/alert-permission.gif" width="128" alt="clawd alert-permission"><br><sub>approve something</sub></td><td align="center"><img src="docs/themes/clawd/alert-question.gif" width="128" alt="clawd alert-question"><br><sub>answer a question</sub></td><td align="center"><img src="docs/themes/clawd/alert-plan.gif" width="128" alt="clawd alert-plan"><br><sub>review a plan</sub></td><td align="center"><img src="docs/themes/clawd/meeting.gif" width="128" alt="clawd meeting"><br><sub>in a meeting</sub></td><td align="center"><img src="docs/themes/clawd/busy.gif" width="128" alt="clawd busy"><br><sub>heads-down</sub></td></tr>
-</table>
-
-<details>
-<summary><b>…and 17 more things Clawd does while working</b></summary>
-
-<table>
-<tr><td align="center"><img src="docs/themes/clawd/starting.gif" width="128" alt="clawd starting"><br><sub>starting</sub></td><td align="center"><img src="docs/themes/clawd/reading.gif" width="128" alt="clawd reading"><br><sub>reading</sub></td><td align="center"><img src="docs/themes/clawd/searching.gif" width="128" alt="clawd searching"><br><sub>searching</sub></td><td align="center"><img src="docs/themes/clawd/writing.gif" width="128" alt="clawd writing"><br><sub>writing</sub></td><td align="center"><img src="docs/themes/clawd/terminal.gif" width="128" alt="clawd terminal"><br><sub>terminal</sub></td><td align="center"><img src="docs/themes/clawd/testing.gif" width="128" alt="clawd testing"><br><sub>testing</sub></td></tr>
-<tr><td align="center"><img src="docs/themes/clawd/building.gif" width="128" alt="clawd building"><br><sub>building</sub></td><td align="center"><img src="docs/themes/clawd/installing.gif" width="128" alt="clawd installing"><br><sub>installing</sub></td><td align="center"><img src="docs/themes/clawd/reviewing.gif" width="128" alt="clawd reviewing"><br><sub>reviewing</sub></td><td align="center"><img src="docs/themes/clawd/planning.gif" width="128" alt="clawd planning"><br><sub>planning</sub></td><td align="center"><img src="docs/themes/clawd/connecting.gif" width="128" alt="clawd connecting"><br><sub>connecting</sub></td><td align="center"><img src="docs/themes/clawd/responding.gif" width="128" alt="clawd responding"><br><sub>responding</sub></td></tr>
-<tr><td align="center"><img src="docs/themes/clawd/configuring.gif" width="128" alt="clawd configuring"><br><sub>configuring</sub></td><td align="center"><img src="docs/themes/clawd/delegating.gif" width="128" alt="clawd delegating"><br><sub>delegating</sub></td><td align="center"><img src="docs/themes/clawd/taskdone.gif" width="128" alt="clawd taskdone"><br><sub>taskdone</sub></td><td align="center"><img src="docs/themes/clawd/done.gif" width="128" alt="clawd done"><br><sub>done</sub></td><td align="center"><img src="docs/themes/clawd/cancelled.gif" width="128" alt="clawd cancelled"><br><sub>cancelled</sub></td></tr>
-</table>
-
-</details>
-
-<table><tr><td align="center"><img src="docs/themes/clawd/screensaver.gif" width="128" alt="clawd screensaver"><br><sub>screensaver: the runaway cursor</sub></td></tr></table>
-
-### Santa
-
-Ho ho ho, it's always December on this desk.
-
-<table>
-<tr><td align="center"><img src="docs/themes/santa/thinking.gif" width="128" alt="santa thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/santa/working.gif" width="128" alt="santa working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/santa/compacting.gif" width="128" alt="santa compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/santa/success.gif" width="128" alt="santa success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/santa/error.gif" width="128" alt="santa error"><br><sub>error 💥</sub></td></tr>
-<tr><td align="center"><img src="docs/themes/santa/alerting.gif" width="128" alt="santa alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/santa/alerting2.gif" width="128" alt="santa alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/santa/alerting3.gif" width="128" alt="santa alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/santa/chilling.gif" width="128" alt="santa chilling"><br><sub>chilling</sub></td></tr>
-</table>
-
-Santa has a 25-second comedy screensaver too: `make_screensaver.py --theme santa`.
-
-### Clauddy
-
-The original. A little builder in a construction workshop: blueprints, hammers,
-and a building that cracks when things go wrong.
-
-<table>
-<tr><td align="center"><img src="docs/themes/clauddy/thinking.gif" width="128" alt="clauddy thinking"><br><sub>thinking</sub></td><td align="center"><img src="docs/themes/clauddy/working.gif" width="128" alt="clauddy working"><br><sub>working</sub></td><td align="center"><img src="docs/themes/clauddy/compacting.gif" width="128" alt="clauddy compacting"><br><sub>compacting</sub></td><td align="center"><img src="docs/themes/clauddy/success.gif" width="128" alt="clauddy success"><br><sub>success 🎉</sub></td><td align="center"><img src="docs/themes/clauddy/error.gif" width="128" alt="clauddy error"><br><sub>error 💥</sub></td></tr>
-<tr><td align="center"><img src="docs/themes/clauddy/alerting.gif" width="128" alt="clauddy alerting"><br><sub>needs you</sub></td><td align="center"><img src="docs/themes/clauddy/alerting2.gif" width="128" alt="clauddy alerting2"><br><sub>still waiting…</sub></td><td align="center"><img src="docs/themes/clauddy/alerting3.gif" width="128" alt="clauddy alerting3"><br><sub>HELLO??</sub></td><td align="center"><img src="docs/themes/clauddy/chilling.gif" width="128" alt="clauddy chilling"><br><sub>chilling</sub></td></tr>
-</table>
-
-### Glyphs
-
-No character, just bold symbols on coloured grounds. Readable from across the
-room, for the alerts and presence states.
-
-<table>
-<tr><td align="center"><img src="docs/themes/glyphs/alert-permission.gif" width="128" alt="glyphs alert-permission"><br><sub>approve something</sub></td><td align="center"><img src="docs/themes/glyphs/alert-question.gif" width="128" alt="glyphs alert-question"><br><sub>answer a question</sub></td><td align="center"><img src="docs/themes/glyphs/alert-plan.gif" width="128" alt="glyphs alert-plan"><br><sub>review a plan</sub></td><td align="center"><img src="docs/themes/glyphs/meeting.gif" width="128" alt="glyphs meeting"><br><sub>in a meeting</sub></td><td align="center"><img src="docs/themes/glyphs/busy.gif" width="128" alt="glyphs busy"><br><sub>heads-down</sub></td></tr>
-</table>
-
-### Embers
-
-The calm screensaver: slow drifting embers that never look like a status.
-
-<table><tr><td align="center"><img src="docs/themes/embers/screensaver.gif" width="128" alt="embers screensaver"><br><sub>screensaver</sub></td></tr></table>
 
 # Documentation
 
