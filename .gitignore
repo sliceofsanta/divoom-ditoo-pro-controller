@@ -15,3 +15,9 @@ CLAUDE.local.md
 # Linux target dir used by the Docker CI check, kept separate so it does not
 # overwrite the host binary in /target
 /target-linux
+
+# macOS Finder metadata
+.DS_Store
+
+# regenerable renders from integrations/claude-code/create_cheat_sheet.py
+/output/

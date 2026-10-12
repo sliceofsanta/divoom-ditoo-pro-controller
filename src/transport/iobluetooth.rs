@@ -57,7 +57,14 @@ struct ConnectRequest {
   response_tx: mpsc::UnboundedSender<Response>
 }
 
-static HOST_TX: OnceLock<mpsc::UnboundedSender<ConnectRequest>> = OnceLock::new();
+type PairedDevices = Vec<(String, Address, bool)>;
+
+enum HostRequest {
+  Connect(ConnectRequest),
+  Paired(oneshot::Sender<PairedDevices>)
+}
+
+static HOST_TX: OnceLock<mpsc::UnboundedSender<HostRequest>> = OnceLock::new();
 
 struct DelegateIvars {
   buffer: Rc<RefCell<Vec<u8>>>
@@ -268,10 +275,14 @@ where
       break;
     }
     match host_rx.try_recv() {
-      Ok(request) => run_connection(request),
+      Ok(HostRequest::Connect(request)) => run_connection(request),
+      Ok(HostRequest::Paired(reply)) => {
+        let _ = reply.send(paired_ditoo_devices_blocking());
+      }
       Err(mpsc::error::TryRecvError::Disconnected) => break,
       Err(mpsc::error::TryRecvError::Empty) => {
-        std::thread::sleep(Duration::from_millis(20));
+        // Service main-queue framework callbacks even between connections.
+        pump_run_loop(0.02);
       }
     }
   }
@@ -319,12 +330,12 @@ impl DeviceConnection {
     let (response_tx, response_rx) = mpsc::unbounded_channel();
 
     host_tx
-      .send(ConnectRequest {
+      .send(HostRequest::Connect(ConnectRequest {
         mac_address,
         ready_tx,
         cmd_rx,
         response_tx
-      })
+      }))
       .map_err(|_| "Bluetooth host loop is gone")?;
 
     match ready_rx.await {
@@ -403,13 +414,23 @@ fn paired_ditoo_devices_blocking() -> Vec<(String, Address, bool)> {
   result
 }
 
+async fn paired_ditoo_devices() -> Result<PairedDevices, Box<dyn Error>> {
+  // CoreBluetooth coordinator initialization must happen on the host's main
+  // thread, just like RFCOMM connections. A spawn_blocking discovery can hang
+  // waiting for the coordinator before the first connect request is queued.
+  let host = HOST_TX.get().ok_or("Bluetooth host is not running")?;
+  let (reply, result) = oneshot::channel();
+  host.send(HostRequest::Paired(reply)).map_err(|_| "Bluetooth host loop is gone")?;
+  result.await.map_err(|_| "Bluetooth discovery request dropped".into())
+}
+
 pub async fn find_paired_ditoo_pro_devices() -> Result<Vec<Address>, Box<dyn Error>> {
-  let devices = tokio::task::spawn_blocking(paired_ditoo_devices_blocking).await?;
+  let devices = paired_ditoo_devices().await?;
   Ok(devices.into_iter().map(|(_, addr, _)| addr).collect())
 }
 
 pub async fn list_paired_devices() -> Result<(), Box<dyn Error>> {
-  let devices = tokio::task::spawn_blocking(paired_ditoo_devices_blocking).await?;
+  let devices = paired_ditoo_devices().await?;
   for (name, address, connected) in devices {
     info!("{} ({}) - connected: {}", name, address, connected);
   }

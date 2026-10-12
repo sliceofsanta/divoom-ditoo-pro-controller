@@ -24,6 +24,9 @@ use crate::divoom_file_format::frame_header::FrameHeader;
 
 #[cfg(target_os = "macos")]
 mod address;
+mod keylight;
+mod status_strip;
+mod presentation;
 pub mod divoom_file_format;
 pub mod protocol;
 mod transport;
@@ -509,6 +512,7 @@ fn overlay_fanout_pips(animation: &mut DivoomAnimation, done: u32, total: u32) {
 ///
 /// Returns None for anything malformed rather than guessing: a wrong pip count
 /// is worse than none, because the whole point is that you can trust the count.
+#[cfg(test)]
 fn parse_fanout(text: &str) -> Option<(u32, u32)> {
   let (done, total) = text.trim().split_once('/')?;
   let done: u32 = done.trim().parse().ok()?;
@@ -528,7 +532,9 @@ fn apply_overlays(animation: &mut DivoomAnimation, overlays: &Overlays) {
   if let Some(percent) = overlays.context {
     overlay_context_gauge(animation, percent);
   }
-  if let Some((done, total)) = overlays.fanout {
+  if let Some(strip) = overlays.strip {
+    strip.paint(animation);
+  } else if let Some((done, total)) = overlays.fanout {
     overlay_fanout_pips(animation, done, total);
   }
 }
@@ -539,7 +545,8 @@ struct Overlays {
   /// Context window used, as a percentage. Bottom row.
   context: Option<u8>,
   /// Parallel agents, as (finished, total). Top row.
-  fanout: Option<(u32, u32)>
+  fanout: Option<(u32, u32)>,
+  strip: Option<status_strip::Strip>
 }
 
 /// Recompute each frame's palette from its pixels. Needed after compositing,
@@ -578,13 +585,15 @@ fn priority(state: &str) -> u8 {
   let state = state.trim_end_matches(":now");
   match state {
     // Every flavour of alert outranks everything: they all mean "you".
-    "alerting" | "alert-question" | "alert-permission" | "alert-plan" => 100,
+    "alerting" | "alerting2" | "alerting3" | "alert-question" | "alert-permission" | "alert-plan" => 100,
     "number" => 95,
     "error" => 90,
     "compacting" => 70,
-    "working" => 60,
-    "thinking" => 50,
-    "success" => 40,
+    "thinking" | "responding" => 50,
+    s if is_busy(s) => 60,
+    "success" | "done" => 40,
+    "cancelled" => 35,
+    "starting" | "configuring" | "taskdone" => 30,
     "chilling" => 10,
     _ => 5
   }
@@ -596,7 +605,7 @@ fn merge_sessions(states: &[(String, Duration)]) -> Option<String> {
   states
     .iter()
     .filter(|(state, age)| *age < SESSION_STALE_AFTER || is_verdict(state))
-    .max_by_key(|(state, _)| priority(state))
+    .max_by_key(|(state, age)| (priority(state), std::cmp::Reverse(*age)))
     .map(|(state, _)| state.clone())
 }
 
@@ -649,6 +658,9 @@ fn read_sessions(dir: &Path) -> Vec<(String, Duration)> {
   let mut out = Vec::new();
   for entry in entries.flatten() {
     let path = entry.path();
+    if entry.file_name().to_string_lossy().starts_with('.') {
+      continue; // atomic-write staging files are not session votes
+    }
     if !path.is_file() {
       continue;
     }
@@ -886,15 +898,17 @@ const MAX_DAEMON_RECONNECTS: u32 = 5;
 /// States that mean "Claude is doing something", for the purpose of deciding
 /// whether a finish was worth celebrating.
 fn is_busy(state: &str) -> bool {
-  matches!(state, "thinking" | "working" | "compacting")
+  matches!(state, "thinking" | "working" | "compacting" | "reading" | "searching"
+    | "writing" | "terminal" | "testing" | "building" | "installing" | "reviewing"
+    | "planning" | "delegating" | "connecting" | "responding")
 }
 
 /// Decide what a finish actually means. Only `success` is gated: a celebration
 /// has to be earned or it stops carrying information, so a turn that wrapped
-/// up in seconds goes quietly idle instead. Every other state passes through.
+/// up in seconds gets a small check instead. Every other state passes through.
 fn resolve_finish<'a>(state: &'a str, worked_for: Duration, timings: &Timings) -> &'a str {
   if state == "success" && worked_for < timings.celebrate_after {
-    "chilling"
+    "done"
   } else {
     state
   }
@@ -921,7 +935,11 @@ fn present<'a>(state: &'a str, held: Duration, timings: &Timings) -> &'a str {
     {
       "alerting2"
     }
-    "success" | "error" if held >= timings.transient => "chilling",
+    "success" | "error" if held >= timings.transient =>
+      present("chilling", held.saturating_sub(timings.transient), timings),
+    "done" | "cancelled" | "starting" | "configuring" | "taskdone"
+      if held >= Duration::from_secs(3) =>
+      present("chilling", held.saturating_sub(Duration::from_secs(3)), timings),
     // A long idle stretch falls through to a screensaver, if one is installed.
     // Only from idle: never interrupt a state that is telling you something.
     "chilling"
@@ -965,7 +983,17 @@ pub async fn run_status_daemon(
   let number_file = state_file.with_file_name("number");
   // Parallel agents, as "done/total", written by the SubagentStart and
   // SubagentStop hooks.
-  let fanout_file = state_file.with_file_name("fanout");
+  // Key-light commands queued by `ditoo-state.sh keyboard ...`, sent over the
+  // held connection. The standalone CLI command reconnects for every press,
+  // and every reconnect plays the device's chime.
+  let keyboard_queue = state_file.with_file_name("keyboard-queue");
+  // The key light's on/off belief and effect offset, kept across restarts
+  // because the device cannot be asked for either. See keylight.rs.
+  let keylight_file = state_file.with_file_name("keyboard-state");
+  let keylight_off_file = state_file.with_file_name("keyboard-sync-off");
+  let mut keys =
+    keylight::KeyLight::load(&std::fs::read_to_string(&keylight_file).unwrap_or_default());
+  let mut keys_saved = keys.save();
   // Touched by the UserPromptSubmit hook: the only evidence the daemon has
   // that a human is actually at the keyboard.
   let prompt_file = state_file.with_file_name("last-prompt");
@@ -986,6 +1014,11 @@ pub async fn run_status_daemon(
   let mut last_clock: Option<u16> = None;
   let run_dir = state_file.parent().unwrap_or(faces_dir);
   let mut last_overlays = Overlays::default();
+  let mut last_overlay_refresh = tokio::time::Instant::now();
+  let presentation_start = tokio::time::Instant::now();
+  let mut presentation = presentation::Stabilizer::default();
+  let mut animation_face = String::new();
+  let mut animation_started = tokio::time::Instant::now();
   // `requested` is what the hooks asked for; `displayed` is the face actually
   // on the panel. They differ whenever a state is being presented over time --
   // an alert that has escalated, or a verdict that has decayed to idle.
@@ -1136,22 +1169,55 @@ pub async fn run_status_daemon(
           timings.transient = Duration::MAX;
         }
 
-        // Opt-in decorations. Both are absent by default, because the faces
-        // are drawn by hand and painting over a row of them should be the
-        // owner's decision rather than something that just happens.
-        let overlays = Overlays {
+        // Context is opt-in. The Clawd top-row strip is resolved below after
+        // alert escalation and idle/presence selection determine the face.
+        let mut overlays = Overlays {
           context: std::fs::read_to_string(&context_file)
             .ok()
             .and_then(|v| v.trim().parse::<u8>().ok()),
-          fanout: std::fs::read_to_string(&fanout_file)
-            .ok()
-            .and_then(|v| parse_fanout(&v))
+          fanout: None,
+          strip: None
         };
-        if overlays != last_overlays {
-          // A decoration changed, so the panel has to be redrawn even though
-          // the state itself has not moved.
-          displayed = None;
-          last_overlays = overlays;
+
+        // New callers publish closed command files; retain the old queue for
+        // compatibility with callers installed before the spool upgrade.
+        let command_dir = state_file.with_file_name("keyboard-commands");
+        let mut command_files: Vec<_> = std::fs::read_dir(&command_dir)
+          .into_iter().flatten().flatten().map(|entry| entry.path())
+          .filter(|path| path.extension().is_some_and(|ext| ext == "cmd"))
+          .collect();
+        command_files.sort_by_key(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok());
+        let taking = keyboard_queue.with_extension("taking");
+        if std::fs::rename(&keyboard_queue, &taking).is_ok() {
+          command_files.insert(0, taking);
+        }
+        for command_file in command_files {
+          if connection.is_none() { break; }
+          let queued = std::fs::read_to_string(&command_file).unwrap_or_default();
+          let _ = std::fs::remove_file(&command_file);
+          for word in queued.split_whitespace() {
+            let mode = match word {
+              "next" => keylight::NEXT,
+              "prev" => keylight::PREV,
+              "toggle" => keylight::TOGGLE,
+              "on" => { keys.resync(true); continue; },
+              "off" => { keys.resync(false); continue; },
+              other => { info!("Ignoring key-light command {:?}", other); continue; }
+            };
+            if let Some(active) = connection.as_mut() {
+              if let Err(e) = send_key_modes(active, &[mode]).await {
+                keys.invalidate();
+                info!("Key-light send failed ({}); resync required", e);
+                if let Some(dead) = connection.take() {
+                  dead.disconnect().await.ok();
+                }
+                displayed = None;
+                break;
+              } else {
+                keys.manual(mode);
+              }
+            }
+          }
         }
 
         // Drain anything the device sent us. Nothing else consumes this
@@ -1185,6 +1251,10 @@ pub async fn run_status_daemon(
           // Record what the merge decided, so `status` explains the panel.
           let _ = std::fs::write(state_file, format!("{}\n", state));
         }
+
+        // Keep short-lived tool changes from replacing a readable scene.
+        // Input requests, fatal outcomes and team work still surface at once.
+        state = presentation.select(&state, presentation_start.elapsed());
 
         // A trailing ":now" means the caller is asserting a verdict rather
         // than reporting a session state, so it is shown as asked. Wrapped
@@ -1243,6 +1313,53 @@ pub async fn run_status_daemon(
             face = presence.to_string();
           }
         }
+        if animation_face != face {
+          animation_face = face.clone();
+          animation_started = tokio::time::Instant::now();
+        }
+        let agents = std::fs::read_to_string(state_file.with_file_name("agent-strip"))
+          .ok().and_then(|text| status_strip::Agents::parse(&text,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+              .unwrap_or_default().as_secs())).unwrap_or_default();
+        overlays.strip = Some(status_strip::Strip::for_face(&face, agents));
+        // The identity-aware strip replaces the old aggregate blue pips.
+        overlays.fanout = None;
+        let urgent_overlay = match (overlays.strip, last_overlays.strip) {
+          (Some(new), Some(old)) => new.attention_changed(old),
+          _ => false,
+        };
+        if overlays != last_overlays && (displayed.as_deref() != Some(face.as_str())
+          || urgent_overlay || last_overlay_refresh.elapsed() >= Duration::from_secs(3)) {
+          displayed = None;
+          last_overlays = overlays;
+          last_overlay_refresh = tokio::time::Instant::now();
+        }
+
+        // The key light follows the face every tick, not just on change:
+        // alerts animate it, and flourishes run over several ticks. Only with
+        // a live connection, so a step is never counted as sent when it was not.
+        if let Some(active) = connection.as_mut() {
+          let target = if keylight_off_file.exists() {
+            keylight::Pattern::Manual
+          } else {
+            keylight::pattern_for(&face)
+          };
+          let modes = keys.tick(target, std::time::Instant::now());
+          if let Err(e) = send_key_modes(active, &modes).await {
+            keys.invalidate();
+            info!("Key-light send failed ({}); dropping the connection", e);
+            if let Some(dead) = connection.take() {
+              dead.disconnect().await.ok();
+            }
+            displayed = None;
+          }
+        }
+        let snapshot = keys.save();
+        if snapshot != keys_saved {
+          let _ = std::fs::write(&keylight_file, &snapshot);
+          keys_saved = snapshot;
+        }
+
         if displayed.as_deref() == Some(face.as_str()) {
           // Nothing to redraw. Anything that must happen EVERY tick -- draining
           // the device's channel, noticing a context change -- has to run
@@ -1359,7 +1476,7 @@ pub async fn run_status_daemon(
         let Some(active) = connection.as_mut() else {
           continue;
         };
-        match send_state(active, &path, &overlays).await {
+        match send_state(active, &path, &overlays, animation_started.elapsed()).await {
           Ok(()) => {
             info!("Applied state {}", face);
             consecutive_failures = 0;
@@ -1387,8 +1504,26 @@ pub async fn run_status_daemon(
     }
   }
 
-  if let Some(active) = connection {
+  if let Some(mut active) = connection {
+    // Leave the user's own key effect showing, not whatever an alert was
+    // alternating to when the daemon was stopped.
+    let home = keys.go_home();
+    if send_key_modes(&mut active, &home).await.is_err() {
+      keys.invalidate();
+    }
+    let _ = std::fs::write(&keylight_file, keys.save());
     active.disconnect().await?;
+  }
+  Ok(())
+}
+
+async fn send_key_modes(conn: &mut DeviceConnection, modes: &[u8]) -> Result<(), Box<dyn Error>> {
+  for &mode in modes {
+    let packet = Packet {
+      command: Command::LightArrowSwitch,
+      payload: protocol::keyboard_backlight::serialize(mode)
+    };
+    conn.fire_and_forget(&packet).await?;
   }
   Ok(())
 }
@@ -1398,7 +1533,14 @@ pub async fn run_status_daemon(
 /// -- fall back to the base face.
 fn face_path(dirs: &[&Path], state: &str) -> Option<std::path::PathBuf> {
   let base = state.trim_end_matches(|c: char| c.is_ascii_digit());
-  for name in [state, base] {
+  let fallback = if is_busy(state) {
+    "working"
+  } else if matches!(state, "starting" | "configuring" | "taskdone" | "done" | "cancelled" | "screensaver") {
+    "chilling"
+  } else {
+    base
+  };
+  for name in [state, base, fallback] {
     for dir in dirs {
       for ext in ["gif", "png"] {
         let candidate = dir.join(format!("{}.{}", name, ext));
@@ -1414,7 +1556,8 @@ fn face_path(dirs: &[&Path], state: &str) -> Option<std::path::PathBuf> {
 async fn send_state(
   conn: &mut DeviceConnection,
   path: &Path,
-  overlays: &Overlays
+  overlays: &Overlays,
+  elapsed: Duration
 ) -> Result<(), Box<dyn Error>> {
   let animation = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif")) {
     DivoomAnimation::from_gif(&mut BufReader::new(File::open(path)?))?
@@ -1423,6 +1566,9 @@ async fn send_state(
   };
   let mut animation = animation;
   apply_overlays(&mut animation, overlays);
+  // Keep the scene's original clock across uploads. Resetting it after each
+  // transfer would freeze the story when updates arrive faster than uploads.
+  presentation::resume_animation(&mut animation, elapsed);
   let mut buf = Vec::new();
   animation.save_to_divoom_format(&mut buf)?;
   for packet in create_network_packets_from(&buf)? {
@@ -1607,6 +1753,12 @@ mod status_daemon_tests {
     assert!(is_busy("thinking"));
     assert!(is_busy("working"));
     assert!(is_busy("compacting"));
+    for action in ["reading", "searching", "writing", "testing", "building", "installing",
+      "terminal", "reviewing", "planning", "delegating", "connecting", "responding"] {
+      assert!(is_busy(action), "{} contributes to the work duration", action);
+      assert!(priority(action) > priority("success"));
+      assert!(priority(action) < priority("alert-permission"));
+    }
     for idle in ["chilling", "alerting", "success", "error", "off"] {
       assert!(!is_busy(idle), "{} should not count as busy", idle);
     }
@@ -1615,8 +1767,8 @@ mod status_daemon_tests {
   #[test]
   fn celebration_must_be_earned() {
     let timings = t();
-    assert_eq!(resolve_finish("success", Duration::from_secs(0), &timings), "chilling");
-    assert_eq!(resolve_finish("success", Duration::from_secs(599), &timings), "chilling");
+    assert_eq!(resolve_finish("success", Duration::from_secs(0), &timings), "done");
+    assert_eq!(resolve_finish("success", Duration::from_secs(599), &timings), "done");
     assert_eq!(resolve_finish("success", Duration::from_secs(600), &timings), "success");
   }
 
@@ -1656,7 +1808,7 @@ mod status_daemon_tests {
     let timings = t();
     let raw = "success";
     let resolved = resolve_finish(raw, Duration::from_secs(1), &timings);
-    assert_eq!(resolved, "chilling");
+    assert_eq!(resolved, "done");
     assert_ne!(resolved, raw, "resolution rewrote the state, so the raw value \
                                must be what the loop compares against");
   }
@@ -1977,7 +2129,7 @@ mod status_daemon_tests {
     ).unwrap();
     apply_overlays(
       &mut animation,
-      &Overlays { context: Some(100), fanout: Some((2, 4)) }
+      &Overlays { context: Some(100), fanout: Some((2, 4)), strip: None }
     );
     let image = animation.frames[0].image.to_rgb8();
     let gauge = (0..16).filter(|x| image.get_pixel(*x, 15)[0] > 140).count();
@@ -2048,7 +2200,7 @@ mod status_daemon_tests {
     // resolve_finish is what a session's Stop goes through; an explicit
     // verdict bypasses it entirely, which is what the ":now" marker selects.
     let timings = t();
-    assert_eq!(resolve_finish("success", Duration::from_secs(1), &timings), "chilling");
+    assert_eq!(resolve_finish("success", Duration::from_secs(1), &timings), "done");
     // The daemon skips the call altogether when the marker is present, so the
     // state it renders is the one that was asked for.
     let asked = "success";

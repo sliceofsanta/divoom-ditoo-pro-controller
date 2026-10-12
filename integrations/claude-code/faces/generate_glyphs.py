@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the triage and presence glyphs.
+"""Generate five Clawd triage and presence animations.
+
+Clawd is the default theme; --theme glyphs selects the original symbol-only
+designs implemented below. Neither theme overwrites the nine core faces.
 
 These are ADDITIONS, not replacements: the nine hand-drawn status faces are
 untouched. Written separately so re-running this can never overwrite them.
@@ -15,7 +18,7 @@ outward at the room rather than inward at you.
     meeting           you are in a meeting (for whoever is walking over)
     busy              heads-down, Focus is on
 
-Each owns a background colour so it is separable across a room, and carries a
+The original glyph theme owns a background colour for each state, and carries a
 bold symbol so it is unambiguous up close. That split -- colour at distance,
 shape near -- is what has survived every previous round of this artwork.
 """
@@ -208,9 +211,16 @@ def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--preview", action="store_true")
   parser.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
+  parser.add_argument("--theme", choices=("clawd", "glyphs"), default="clawd",
+                      help="Clawd characters or the previous standalone glyphs")
   args = parser.parse_args()
   ok = True
-  for name, (builder, doc) in GLYPHS.items():
+  if args.theme == "clawd":
+    from clawd_faces import FACES
+    chosen = {name: FACES[name] for name in GLYPHS}
+  else:
+    chosen = GLYPHS
+  for name, (builder, doc) in chosen.items():
     frames, delays = builder()
     key = [tuple(tuple(r) for r in f) for f in frames]
     distinct = len(set(key))
@@ -221,7 +231,7 @@ def main():
     indexed, palette = index_frames(frames)
     size = write_gif(os.path.join(args.out, f"{name}.gif"), indexed, palette, delays)
     write_png(os.path.join(args.out, f"{name}.png"), frames[0])
-    warn = "" if stalls == 0 else f"   <-- {stalls} frame(s) repeat back to back"
+    warn = "" if stalls == 0 or args.theme == "clawd" else f"   <-- {stalls} frame(s) repeat back to back"
     if warn:
       ok = False
     print(f"{name:18s} {len(frames):2d} frames {len(palette):2d} colours "

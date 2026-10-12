@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Build the one state the hand-drawn set does not cover: `screensaver`.
+"""Export Clawd's runaway-cursor comedy screensaver for the 16x16 Ditoo.
 
-Shown after 30 minutes idle, so it has two jobs -- stay interesting for a long
-time, and never be mistaken for a status. It therefore uses the SAME palette as
-the rest of the set (so it belongs) but no symbol and almost no light (so it
-cannot be read as the panel trying to tell you something).
-
-Embers drifting upward: sparse, slow, and on three different speeds so the
-field never visibly repeats.
+Earlier animations remain available with --theme santa or --theme embers.
 """
 
+import argparse
 import os
 import sys
 
 from gifwriter import write_gif
+from clawd_faces import screensaver_frames as build
+from santa_screensaver import build as build_santa
+from generate_faces import write_png, validate_frames
 
 SIZE = 16
 
@@ -25,7 +23,7 @@ EMBER_DIM = (76, 48, 39)    # #4C3027
 GLOW = (255, 210, 106)      # #FFD26A, used sparingly
 
 
-def build():
+def build_embers():
   frames, delays = [], []
   count = 24  # long loop: at 260ms this is a touch over six seconds
 
@@ -90,16 +88,22 @@ def scale(frame, factor):
 
 def main():
   here = os.path.dirname(os.path.abspath(__file__))
-  frames, delays = build()
+  parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument("--theme", choices=("clawd", "santa", "embers"), default="clawd")
+  parser.add_argument("--out", default=here)
+  args = parser.parse_args()
+  here = args.out
+  frames, delays = {"clawd": build, "santa": build_santa, "embers": build_embers}[args.theme]()
+  validate_frames("screensaver", frames, delays)
   distinct = len({tuple(tuple(r) for r in f) for f in frames})
   indexed, palette = index(frames)
   size = write_gif(os.path.join(here, "screensaver.gif"), indexed, palette, delays)
   write_gif(os.path.join(here, "screensaver_preview.gif"),
             [scale(f, 20) for f in indexed], palette, delays)
+  write_png(os.path.join(here, "screensaver.png"), frames[0])
+  write_png(os.path.join(here, "screensaver_preview.png"), scale(frames[0], 20))
   print(f"screensaver  {len(frames)} frames, {distinct} distinct, "
-        f"{len(palette)} colours, {size} bytes")
-  if distinct != len(frames):
-    print(f"  WARNING: only {distinct} distinct frames -- will read as a stutter")
+        f"{len(palette)} colours, {size} bytes, {sum(delays) / 1000:.1f}s")
   return 0
 
 

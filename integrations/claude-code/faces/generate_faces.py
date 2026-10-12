@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
-"""Generate nine 16x16 Santa status animations for Ditoo Pro.
+"""Generate the complete Clawd 16x16 animation set for Ditoo Pro.
 
-Santa is the default theme, implemented in santa_faces.py. Use --theme clauddy
-to regenerate the earlier Clauddy artwork defined below.
+Clawd is the default theme, implemented in clawd_faces.py. It includes the nine
+core states, detailed tool/lifecycle actions, input requests, presence, idle and off.
+Use --theme santa or --theme clauddy to regenerate the earlier themes.
 
-The visual grammar is intentionally simple: one large flat terracotta mascot,
-one oversized prop, charcoal background, tiny black eyes, stick arms and four
-feet. The construction story remains, but scenery never competes with Clauddy:
-
-    thinking    a big cyan blueprint opens in front of Clauddy
-    compacting  Clauddy squeezes loose sheets into one small bundle
-    working     Clauddy hammers a brick at a workbench
-    alerting    one exclamation grows into a full alarm
-    success     a tiny finished workshop glows above Clauddy
-    error       that workshop cracks while Clauddy stares with X eyes
-    chilling    Clauddy closes their eyes and nurses a warm mug
-
-The art is drawn directly on the 16x16 grid and is original to this project;
-the style and staging are informed by the Clauddy MiniToo reference.
+Clawd uses a flat terracotta body, black eyes, four feet and a clear prop for
+each action. All artwork is drawn directly on the native 16x16 grid. The older
+Clauddy construction-workshop implementation below is retained as an option.
 """
 
 import argparse
@@ -375,7 +365,8 @@ CLAUDDY_FACES = {
   "off": (off_frames, "blank display"),
 }
 
-from santa_faces import FACES
+from clawd_faces import FACES
+from santa_faces import FACES as SANTA_FACES
 
 
 # --- output ---------------------------------------------------------------
@@ -466,11 +457,16 @@ def main():
   parser.add_argument("--preview", action="store_true",
                       help="also write 320x320 preview GIFs")
   parser.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
-  parser.add_argument("--theme", choices=("santa", "clauddy"), default="santa",
-                      help="character theme (default: santa)")
+  parser.add_argument("--only", help="regenerate one named state without touching the other assets")
+  parser.add_argument("--theme", choices=("clawd", "santa", "clauddy"), default="clawd",
+                      help="character theme (default: clawd)")
   args = parser.parse_args()
 
-  faces = FACES if args.theme == "santa" else CLAUDDY_FACES
+  faces = {"clawd": FACES, "santa": SANTA_FACES, "clauddy": CLAUDDY_FACES}[args.theme]
+  if args.only:
+    if args.only not in faces:
+      parser.error(f"Unknown state: {args.only}")
+    faces = {args.only: faces[args.only]}
   for name, (builder, doc) in faces.items():
     frames, delays = builder()
     validate_frames(name, frames, delays)
@@ -495,6 +491,14 @@ def main():
       preview_png = os.path.join(args.out, f"{name}_preview.png")
       write_png(preview_png, scale(frames[0], 20))
       print(f"    -> {preview_png}")
+      # Twelve chronological beats for a quick native-pixel visual review.
+      board = [[(18, 19, 25)] * (6 * 176) for _ in range(2 * 176)]
+      for sample in range(12):
+        tile = scale(frames[sample * len(frames) // 12], 10)
+        x, y = (sample % 6) * 176 + 8, (sample // 6) * 176 + 8
+        for row, pixels in enumerate(tile):
+          board[y + row][x:x+160] = pixels
+      write_png(os.path.join(args.out, f"{name}_storyboard.png"), board)
     print()
   return 0
 

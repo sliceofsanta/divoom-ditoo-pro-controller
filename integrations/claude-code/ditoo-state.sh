@@ -287,6 +287,16 @@ run_worker() {
 
 mkdir -p "$RUNDIR" 2>/dev/null
 
+enqueue_keyboard() {
+  # Publish a closed file atomically. Renaming an append-only queue can lose a
+  # concurrent writer that already opened the old inode before the rename.
+  local spool="$RUNDIR/keyboard-commands" pending
+  mkdir -p "$spool" || return 1
+  pending="$(mktemp "$spool/.pending.XXXXXXXX")" || return 1
+  printf '%s\n' "$1" > "$pending"
+  mv "$pending" "$spool/$(date +%s)-${pending##*.}.cmd"
+}
+
 case "${1:-}" in
   --worker)
     run_worker
@@ -397,6 +407,12 @@ case "${1:-}" in
     fi
     printf 'binary  : %s\n' "$(resolve_bin || printf 'NOT FOUND')"
     printf 'faces   : %s\n' "$FACES_DIR"
+    if [ -f "$RUNDIR/keyboard-sync-off" ]; then
+      printf 'key sync: disabled (manual)\n'
+    else
+      printf 'key sync: enabled\n'
+    fi
+    printf 'key belief: %s\n' "$(read_state_file "$RUNDIR/keyboard-state")"
     printf -- '--- last 10 log lines ---\n'
     tail -n 10 "$LOG" 2>/dev/null || printf '(no log yet)\n'
     exit 0
@@ -438,6 +454,36 @@ case "${1:-}" in
     : > "$RUNDIR/last-prompt" 2>/dev/null
     exit 0
     ;;
+  keyboard)
+    # The Ditoo's key backlight. The daemon drives it to match each face; this
+    # is the manual side. Commands go through the daemon's held connection --
+    # the standalone `keyboard-backlight` command reconnects, and chimes, for
+    # every press.
+    case "${2:-}" in
+      next|prev|toggle)
+        if daemon_running; then
+          enqueue_keyboard "$2"
+        else
+          BIN="$(resolve_bin)" || { printf 'controller binary not found\n' >&2; exit 1; }
+          run_bin "$BIN" keyboard-backlight "$2"
+        fi
+        ;;
+      resync)
+        # The device cannot report whether its keys are lit, so the daemon
+        # keeps a belief. If you change the keys on the device, tell it.
+        case "${3:-}" in
+          on|off) enqueue_keyboard "$3" ;;
+          *) printf 'usage: %s keyboard resync on|off\n' "$(basename "$SELF")" >&2; exit 2 ;;
+        esac
+        ;;
+      disable) : > "$RUNDIR/keyboard-sync-off" ;;
+      enable)  rm -f "$RUNDIR/keyboard-sync-off" ;;
+      *)
+        printf 'usage: %s keyboard next|prev|toggle | resync on|off | enable|disable\n' "$(basename "$SELF")" >&2
+        exit 2 ;;
+    esac
+    exit 0
+    ;;
   fanout)
     # Track a fan-out of parallel agents, drawn as pips along the top row.
     #
@@ -475,7 +521,10 @@ case "${1:-}" in
     printf '%s\n' "$value" > "$RUNDIR/number"
     STATE="number"
     ;;
-  thinking | working | alerting | alert-question | alert-permission | alert-plan \
+  reading | searching | writing | terminal | testing | building | installing \
+    | reviewing | planning | delegating | connecting | responding | starting \
+    | configuring | taskdone | done | cancelled | screensaver | alerting2 | alerting3 \
+    | thinking | working | alerting | alert-question | alert-permission | alert-plan \
     | meeting | busy | number | success | error | compacting | chilling | custom | off \
     | success:now | error:now)
     # The ":now" pair are verdicts the caller is ASSERTING: shown as asked

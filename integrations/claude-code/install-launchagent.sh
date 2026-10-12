@@ -47,6 +47,7 @@ fi
 mkdir -p "$PREFIX/faces" "$HOME/Library/LaunchAgents" "$RUNDIR"
 cp "$BIN" "$PREFIX/divoom-ditoo-pro-controller"
 cp "$HERE/ditoo-state.sh" "$HERE/ditoo-context.sh" "$PREFIX/"
+cp "$HERE/ditoo_hook.py" "$PREFIX/"
 cp "$HERE"/faces/*.gif "$HERE"/faces/*.png "$PREFIX/faces/" 2>/dev/null
 # The calendar helper is an .app bundle because only a bundle can raise the
 # Calendar permission prompt. Copy it whole so the signature survives.
