@@ -17,7 +17,7 @@ CLAUDE.local.md
 /target-linux
 
 # macOS Finder metadata
-.DS_Store
+**/.DS_Store
 
 # regenerable renders from integrations/claude-code/create_cheat_sheet.py
 /output/
